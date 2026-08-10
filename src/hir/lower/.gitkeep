@@ -1,0 +1,3 @@
+# src/hir/lower/ — hir/lower mirror (~5.1k, AST→HIR normalization).
+# Planned: decl.fab, expr.fab, stmt.fab, types.fab, pattern.fab, literal.fab.
+# Status: planned.

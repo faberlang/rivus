@@ -1,0 +1,25 @@
+# Faber build output
+target/
+
+# Generated Faber->Rust emit artifacts
+*.rs
+
+# macOS
+.DS_Store
+
+# Editor / IDE
+.idea/
+.vscode/
+.zed/settings.json
+
+# Caches
+*.tsbuildinfo
+.cache/
+
+# Agent local artifacts
+.claude/
+.vivi/
+
+# Temp files
+tmp/
+__pycache__/

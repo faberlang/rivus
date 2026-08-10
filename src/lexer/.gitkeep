@@ -1,0 +1,2 @@
+# src/lexer/ — radix-lexer mirror (~3.3k). Planned: token.fab, keywords.fab,
+# scan.fab, cursor.fab, interner.fab. Status: planned.

@@ -1,0 +1,4 @@
+# src/semantic/ — semantic passes mirror (needed subset ~10–16k).
+# Planned: collect.fab, resolve.fab, typecheck.fab, definite_assignment.fab,
+# exhaustive.fab, return_path.fab, lint.fab, visibility.fab, import_path.fab.
+# Status: planned.

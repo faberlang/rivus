@@ -1,0 +1,3 @@
+# src/mir/ — radix-mir core mirror (needed subset ~5.3k). Planned: nodes.fab,
+# control.fab, ty.fab, names.fab, capability.fab, layout.fab,
+# collection_ops.fab, generic.fab, lower.fab (HIR→MIR, 2.5k). Status: planned.
