@@ -12,9 +12,14 @@ Directory names mirror Radix **crate** names with the `radix-` prefix stripped
 (`radix-mir-stepper` → `src/mir-stepper/`). Internal modules of the main
 `radix` crate (not separate crates) mirror their path under
 `crates/radix/src/` verbatim (`crates/radix/src/hir/lower/*.rs` →
-`src/hir/lower/*.fab`). The import surface uses the directory name with the
-`rivus:` package prefix and the file name appended:
-`src/mir-stepper/value.fab` → `import from "rivus:mir-stepper/value"`.
+`src/hir/lower/*.fab`). The import surface is the **`§` template form**,
+source-root-relative: `[paths.templates] src = "src"` (faber.toml), then
+`src/mir-stepper/value.fab` → `import from "§src/mir-stepper/value"`
+(coreutils pattern; resolved via `faber/src/package/import_graph.rs`
+`resolve_template_import`). Provider-qualified imports (`rivus:...`) route
+to the library resolver, which requires `build.kind = "lib"` + `[library]`
+and rejects bins; bare paths are an unknown scheme; `./`-relative works but
+`§src/` is the convention (see migrate-diagnostics pilot notes, 2026-08-10).
 
 | Radix crate | Rivus directory |
 |---|---|

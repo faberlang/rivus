@@ -1,0 +1,647 @@
+# rivus/src/diagnostics/diagnostic.fab — core diagnostic data model
+# (port of radix-diagnostics/src/diagnostic.rs + spec.rs).
+#
+# Owns the Diagnostic, Severity, DiagnosticPhase, and DiagnosticArg types
+# shared across all compiler phases. Phase-specific error conversion and
+# catalogs live outside this module to keep the foundation dependency-free.
+#
+# en surface (L3): identifiers port 1:1 from radix. Rust enums → unions,
+# structs → classes, Option<T> → T ∪ null, Vec<T> → list<T>. Builder chains
+# are free functions returning a fresh instance (tela-proven copy pattern —
+# no field mutation in the en surface).
+#
+# Dropped per scope locks: serde derives (no serialization boundary);
+# `codegen_error` constructor (no codegen — L1), though the Codegen phase
+# variant stays in the union for enum completeness; the WARN014
+# file_interface_export_skipped identity special case folds into the general
+# code.issue path (no file-interface exports in rivus).
+
+# Import form: `§` template path — `§src/<module>` resolves under
+# `[paths.templates] src = "src"` (source-root-relative, coreutils pattern).
+# Provider-qualified and bare-path forms are rejected for bin packages
+# (faber package/import_graph.rs).
+import from "§src/diagnostics/span" private span
+
+# ---------------------------------------------------------------------------
+# DiagnosticArg — named fact attached to a diagnostic template.
+# ---------------------------------------------------------------------------
+
+class DiagnosticArg {
+    string name
+    string value
+}
+
+fn diagnostic_arg_new(string name, string value) → DiagnosticArg {
+    return DiagnosticArg { name = name, value = value }
+}
+
+# ---------------------------------------------------------------------------
+# Severity — user-visible severity and compilation policy.
+# ---------------------------------------------------------------------------
+
+union Severity {
+    Error,
+    Warning,
+    Info
+}
+
+# ---------------------------------------------------------------------------
+# DiagnosticPhase — compiler phase that produced or normalized a diagnostic.
+# ---------------------------------------------------------------------------
+
+union DiagnosticPhase {
+    Io,
+    Lex,
+    Parse,
+    Resolve,
+    Lower,
+    Typecheck,
+    Analysis,
+    Mir,
+    Codegen,
+    Tool
+}
+
+# Display for DiagnosticPhase (radix fmt::Display → lowercase name).
+fn phase_name(DiagnosticPhase phase) → string {
+    match phase {
+        case DiagnosticPhase.Io { return "io" }
+        case DiagnosticPhase.Lex { return "lex" }
+        case DiagnosticPhase.Parse { return "parse" }
+        case DiagnosticPhase.Resolve { return "resolve" }
+        case DiagnosticPhase.Lower { return "lower" }
+        case DiagnosticPhase.Typecheck { return "typecheck" }
+        case DiagnosticPhase.Analysis { return "analysis" }
+        case DiagnosticPhase.Mir { return "mir" }
+        case DiagnosticPhase.Codegen { return "codegen" }
+        case DiagnosticPhase.Tool { return "tool" }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# LexErrorKind — lexical failure classes produced before parsing begins.
+# ---------------------------------------------------------------------------
+
+union LexErrorKind {
+    UnterminatedString,
+    InvalidNumber,
+    InvalidEscape,
+    UnexpectedCharacter,
+    RemovedSectionDirective,
+    InvalidCommentSyntax,
+    InlineComment
+}
+
+# ---------------------------------------------------------------------------
+# ParseErrorKind — parser diagnostic taxonomy, grouped by grammar area.
+# ---------------------------------------------------------------------------
+
+union ParseErrorKind {
+    LexError,
+    Expected,
+    Unexpected,
+    DuplicateModifier,
+    InvalidAnnotation,
+    InvalidDeclaration,
+    InvalidModifier,
+    InvalidParameter,
+    InvalidTypeParameter,
+    MissingClassBody,
+    MissingClassName,
+    MissingFunctionBody,
+    MissingFunctionName,
+    InvalidCasuArm,
+    InvalidCasuValue,
+    InvalidPattern,
+    InvalidStatement,
+    MissingBlock,
+    ThereforeWrongContext,
+    ErgoWrongContext,
+    MissingCondition,
+    InvalidAssignmentTarget,
+    InvalidCallArgument,
+    InvalidExpression,
+    InvalidLiteral,
+    InvalidMemberAccess,
+    InvalidOperator,
+    UnterminatedGroup,
+    InvalidType,
+    InvalidTypeAnnotation,
+    UnterminatedTypeParams,
+    InvalidImport,
+    InvalidCommentPlacement
+}
+
+# ---------------------------------------------------------------------------
+# WarningKind — non-fatal semantic findings on the normal transport.
+# ---------------------------------------------------------------------------
+
+union WarningKind {
+    UnusedVariable,
+    UnusedImport,
+    UnusedFunction,
+    UnreachableCode,
+    UnnecessaryCast,
+    TargetNoop,
+    UnusedMutRefParam,
+    UnusedMoveParam,
+    ExplicitIgnotumAnnotation,
+    WildcardAbsorbsNull,
+    DecorativeVisibility,
+    UnnecessaryVaria,
+    FileInterfaceExportSkipped,
+    UnrecognizedCurataAllocator,
+    MonomorphicHoleSolvedToUnion,
+    UnionHoleSolvedMonomorphically
+}
+
+# ---------------------------------------------------------------------------
+# SemanticErrorKind — semantic diagnostic categories used by passes and
+# command policy.
+# ---------------------------------------------------------------------------
+
+union SemanticErrorKind {
+    UndefinedVariable,
+    UndefinedType,
+    UndefinedFunction,
+    UndefinedMember,
+    DuplicateDefinition,
+    ImportNotFound,
+    CircularDependency,
+    LoweringError,
+    CliValidation,
+    SemanticInvalidAnnotation,
+    ShadowedVariable,
+    TypeMismatch,
+    InvalidOperandTypes,
+    NotCallable,
+    WrongArity,
+    MissingTypeAnnotation,
+    InvalidCast,
+    InvalidConversion,
+    UnavailableDeclaration,
+    AirPurityViolation,
+    ImmutableAssignment,
+    SemanticInvalidAssignmentTarget,
+    UseBeforeInit,
+    BreakOutsideBreakable,
+    ContinueOutsideLoop,
+    ReturnOutsideFunction,
+    MissingReturn,
+    NonExhaustiveMatch,
+    UnreachablePattern,
+    DuplicatePattern,
+    OmniaRequiresEnum,
+    OmniaForbidsCatchall,
+    UseAfterMove,
+    BorrowOfMoved,
+    MutableBorrowConflict,
+    CannotMoveOut,
+    LifetimeMismatch,
+    AssignToImmutableBorrow,
+    ModeMismatch,
+    SemanticWarning { WarningKind kind }
+}
+
+# Whether permissive check mode may report this hard error as a softer result.
+# The downgrade set is restricted to missing symbols/imports — type,
+# control-flow, and lowering failures still indicate an invalid program.
+fn is_permissive_check_downgrade(SemanticErrorKind kind) → bool {
+    match kind {
+        case SemanticErrorKind.UndefinedVariable { return true }
+        case SemanticErrorKind.UndefinedType { return true }
+        case SemanticErrorKind.UndefinedFunction { return true }
+        case SemanticErrorKind.UndefinedMember { return true }
+        case SemanticErrorKind.ImportNotFound { return true }
+        case _ { return false }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# PhaseErrorKind — machine-readable phase error kind preserved through
+# conversion (the programmatic identity carrier).
+# ---------------------------------------------------------------------------
+
+union PhaseErrorKind {
+    LexPhase { LexErrorKind kind },
+    ParsePhase { ParseErrorKind kind },
+    SemanticPhase { SemanticErrorKind kind }
+}
+
+# ---------------------------------------------------------------------------
+# Diagnostic — reportable compiler message after phase-specific errors are
+# normalized.
+# ---------------------------------------------------------------------------
+
+class Diagnostic {
+    Severity severity
+    DiagnosticPhase phase
+    string message
+    string ∪ null code
+    PhaseErrorKind ∪ null error_kind
+    list<DiagnosticArg> args
+    string file
+    span.Span ∪ null span
+    string ∪ null source_line
+    string ∪ null help
+}
+
+fn diagnostic_new(Severity severity, string message) → Diagnostic {
+    return Diagnostic {
+        severity = severity,
+        phase = DiagnosticPhase.Tool,
+        message = message,
+        code = null,
+        error_kind = null,
+        args = [],
+        file = "",
+        span = null,
+        source_line = null,
+        help = null
+    }
+}
+
+# Start an error diagnostic and attach context with builder functions.
+fn error(string message) → Diagnostic {
+    return diagnostic_new(Severity.Error, message)
+}
+
+# Start a warning diagnostic and attach context with builder functions.
+fn warning(string message) → Diagnostic {
+    return diagnostic_new(Severity.Warning, message)
+}
+
+# Attach the compiler phase that owns this diagnostic.
+fn with_phase(Diagnostic d, DiagnosticPhase phase) → Diagnostic {
+    return Diagnostic {
+        severity = d.severity,
+        phase = phase,
+        message = d.message,
+        code = d.code,
+        error_kind = d.error_kind,
+        args = d.args,
+        file = d.file,
+        span = d.span,
+        source_line = d.source_line,
+        help = d.help
+    }
+}
+
+# Attach a stable diagnostic code from the public catalog.
+fn with_code(Diagnostic d, string code) → Diagnostic {
+    return Diagnostic {
+        severity = d.severity,
+        phase = d.phase,
+        message = d.message,
+        code = code,
+        error_kind = d.error_kind,
+        args = d.args,
+        file = d.file,
+        span = d.span,
+        source_line = d.source_line,
+        help = d.help
+    }
+}
+
+# Attach a typed phase error kind for programmatic consumers.
+fn with_error_kind(Diagnostic d, PhaseErrorKind kind) → Diagnostic {
+    return Diagnostic {
+        severity = d.severity,
+        phase = d.phase,
+        message = d.message,
+        code = d.code,
+        error_kind = kind,
+        args = d.args,
+        file = d.file,
+        span = d.span,
+        source_line = d.source_line,
+        help = d.help
+    }
+}
+
+# Attach a typed lexer error kind (PhaseErrorKind::LexPhase).
+fn with_lex_kind(Diagnostic d, LexErrorKind kind) → Diagnostic {
+    return with_error_kind(d, variant LexPhase { kind = kind } ∷ PhaseErrorKind)
+}
+
+# Attach a typed parser error kind (PhaseErrorKind::ParsePhase).
+fn with_parse_kind(Diagnostic d, ParseErrorKind kind) → Diagnostic {
+    return with_error_kind(d, variant ParsePhase { kind = kind } ∷ PhaseErrorKind)
+}
+
+# Attach a typed semantic error kind (PhaseErrorKind::SemanticPhase).
+fn with_semantic_kind(Diagnostic d, SemanticErrorKind kind) → Diagnostic {
+    return with_error_kind(d, variant SemanticPhase { kind = kind } ∷ PhaseErrorKind)
+}
+
+# Typed lexer error kind when this diagnostic carries one.
+fn lex_kind(Diagnostic d) → LexErrorKind ∪ null {
+    const PhaseErrorKind ∪ null ek ← d.error_kind
+    if ek is null then return null
+    match ek {
+        case PhaseErrorKind.LexPhase const kind { return kind }
+        case _ { return null }
+    }
+}
+
+# Typed parser error kind when this diagnostic carries one.
+fn parse_kind(Diagnostic d) → ParseErrorKind ∪ null {
+    const PhaseErrorKind ∪ null ek ← d.error_kind
+    if ek is null then return null
+    match ek {
+        case PhaseErrorKind.ParsePhase const kind { return kind }
+        case _ { return null }
+    }
+}
+
+# Typed semantic error kind when this diagnostic carries one.
+fn semantic_kind(Diagnostic d) → SemanticErrorKind ∪ null {
+    const PhaseErrorKind ∪ null ek ← d.error_kind
+    if ek is null then return null
+    match ek {
+        case PhaseErrorKind.SemanticPhase const kind { return kind }
+        case _ { return null }
+    }
+}
+
+# Attach template facts used by structured diagnostics.
+fn with_args(Diagnostic d, list<DiagnosticArg> args) → Diagnostic {
+    return Diagnostic {
+        severity = d.severity,
+        phase = d.phase,
+        message = d.message,
+        code = d.code,
+        error_kind = d.error_kind,
+        args = args,
+        file = d.file,
+        span = d.span,
+        source_line = d.source_line,
+        help = d.help
+    }
+}
+
+# Attach one named template argument.
+fn with_arg(Diagnostic d, string name, string value) → Diagnostic {
+    var list<DiagnosticArg> new_args ← []
+    for from d.args const arg {
+        new_args.appende(arg)
+    }
+    new_args.appende(DiagnosticArg { name = name, value = value })
+    return Diagnostic {
+        severity = d.severity,
+        phase = d.phase,
+        message = d.message,
+        code = d.code,
+        error_kind = d.error_kind,
+        args = new_args,
+        file = d.file,
+        span = d.span,
+        source_line = d.source_line,
+        help = d.help
+    }
+}
+
+# Override severity when command policy intentionally downgrades a fault.
+fn with_severity(Diagnostic d, Severity severity) → Diagnostic {
+    return Diagnostic {
+        severity = severity,
+        phase = d.phase,
+        message = d.message,
+        code = d.code,
+        error_kind = d.error_kind,
+        args = d.args,
+        file = d.file,
+        span = d.span,
+        source_line = d.source_line,
+        help = d.help
+    }
+}
+
+# Attach the display filename used by renderers and plain output.
+fn with_file(Diagnostic d, string file) → Diagnostic {
+    return Diagnostic {
+        severity = d.severity,
+        phase = d.phase,
+        message = d.message,
+        code = d.code,
+        error_kind = d.error_kind,
+        args = d.args,
+        file = file,
+        span = d.span,
+        source_line = d.source_line,
+        help = d.help
+    }
+}
+
+# Attach the source span that should be highlighted.
+fn with_span(Diagnostic d, span.Span sp) → Diagnostic {
+    return Diagnostic {
+        severity = d.severity,
+        phase = d.phase,
+        message = d.message,
+        code = d.code,
+        error_kind = d.error_kind,
+        args = d.args,
+        file = d.file,
+        span = sp,
+        source_line = d.source_line,
+        help = d.help
+    }
+}
+
+# Attach the source line containing the primary span.
+fn with_source_line(Diagnostic d, string line) → Diagnostic {
+    return Diagnostic {
+        severity = d.severity,
+        phase = d.phase,
+        message = d.message,
+        code = d.code,
+        error_kind = d.error_kind,
+        args = d.args,
+        file = d.file,
+        span = d.span,
+        source_line = line,
+        help = d.help
+    }
+}
+
+# Attach file, span, and containing source line for phase conversions.
+fn with_source_context(Diagnostic d, string file, string source, span.Span sp) → Diagnostic {
+    return Diagnostic {
+        severity = d.severity,
+        phase = d.phase,
+        message = d.message,
+        code = d.code,
+        error_kind = d.error_kind,
+        args = d.args,
+        file = file,
+        span = sp,
+        source_line = get_line_at_offset(source, sp.start),
+        help = d.help
+    }
+}
+
+# Attach actionable user guidance.
+fn with_help(Diagnostic d, string help) → Diagnostic {
+    return Diagnostic {
+        severity = d.severity,
+        phase = d.phase,
+        message = d.message,
+        code = d.code,
+        error_kind = d.error_kind,
+        args = d.args,
+        file = d.file,
+        span = d.span,
+        source_line = d.source_line,
+        help = help
+    }
+}
+
+# Sub-variant selected inside a stable diagnostic code, when present.
+fn issue(Diagnostic d) → string ∪ null {
+    return parse_arg_value(d.args, "issue")
+}
+
+# Lookup key for documentation and explain surfaces.
+# Nullable narrowing: the `not is null` check narrows only for assignment,
+# not for operators — capture the narrowed value into a non-null binding
+# (tela-proven pattern: browser.fab identities_from_nodes).
+fn lookup_key(Diagnostic d) → string ∪ null {
+    const string ∪ null code ← d.code
+    if code not is null {
+        const string code2 ← code
+        const string ∪ null iss ← issue(d)
+        if iss not is null {
+            const string iss2 ← iss
+            return code2 + ":" + iss2
+        }
+        return code2
+    }
+    return null
+}
+
+# Compact code label used in default CLI output.
+fn display_label(Diagnostic d) → string ∪ null {
+    return lookup_key(d)
+}
+
+# Whether this diagnostic should make the compilation result fail.
+fn is_error(Diagnostic d) → bool {
+    return d.severity ≡ Severity.Error
+}
+
+# Convert a filesystem read failure into a path-scoped diagnostic.
+# Rivus reads files through host kernels, so the error message is supplied
+# by the driver/kernel goal (exact io text is stderr — not parity-critical).
+fn io_error(string path, string error_message) → Diagnostic {
+    return Diagnostic {
+        severity = Severity.Error,
+        phase = DiagnosticPhase.Io,
+        message = "cannot read '" + path + "': " + error_message,
+        code = null,
+        error_kind = null,
+        args = [],
+        file = path,
+        span = null,
+        source_line = null,
+        help = null
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Free helpers.
+# ---------------------------------------------------------------------------
+
+# Build the compact diagnostic identity string used as the default message.
+# radix's WARN014 file_interface_export_skipped special case folds into the
+# general code.issue path (no file-interface exports in rivus).
+fn diagnostic_identity(string code, list<DiagnosticArg> args) → string {
+    const string ∪ null iss ← parse_arg_value(args, "issue")
+    if iss not is null {
+        const string iss2 ← iss
+        if iss2.longitudo() > 0 {
+            return code + "." + iss2
+        }
+    }
+    return code
+}
+
+# Extract a named diagnostic argument value.
+fn parse_arg_value(list<DiagnosticArg> args, string name) → string ∪ null {
+    for from args const arg {
+        if arg.name ≡ name then return arg.value
+    }
+    return null
+}
+
+# Extract the source line containing a byte offset.
+fn get_line_at_offset(string source, int offset) → string {
+    const int snapped ← nearest_char_boundary(source, offset)
+    var int start ← 0
+    var int i ← snapped
+    while i > 0 {
+        if source.sectio(i - 1, i) ≡ "\n" {
+            start ← i
+            i ← 0
+        } else {
+            i ← i - 1
+        }
+    }
+    var int end ← source.longitudo()
+    i ← snapped
+    while i < source.longitudo() {
+        if source.sectio(i, i + 1) ≡ "\n" {
+            end ← i
+            i ← source.longitudo()
+        } else {
+            i ← i + 1
+        }
+    }
+    return source.sectio(start, end)
+}
+
+# Snap a byte offset down to the nearest UTF-8 char boundary.
+# Latin/ASCII corpus: every byte offset is a char boundary, so the snap is
+# identity after clamping. Full multi-byte snapping is deferred until a
+# non-Latin input surface exists (L1 scope; see migrate-lexer).
+fn nearest_char_boundary(string source, int offset) → int {
+    var int o ← offset
+    if o < 0 then o ← 0
+    if o > source.longitudo() then o ← source.longitudo()
+    return o
+}
+
+# ---------------------------------------------------------------------------
+# DiagnosticSpec — catalog entry attached to a phase-specific error kind,
+# and the reader-locale fallback entries (radix-diagnostics/src/spec.rs,
+# folded here per STRUCTURE.md's two-file surface).
+# ---------------------------------------------------------------------------
+
+class DiagnosticSpec {
+    string code
+    string ∪ null help
+}
+
+# Stable diagnostic spec for visible reader-locale fallback.
+fn locale_fallback_spec() → DiagnosticSpec {
+    return DiagnosticSpec {
+        code = "LOCALE001",
+        help = "use the pack spelling or add the Latin spelling as an explicit alias if the bridge is intentional"
+    }
+}
+
+# Stable diagnostic spec for reader-locale spelling suggestions.
+fn locale_suggestion_spec() → DiagnosticSpec {
+    return DiagnosticSpec {
+        code = "LOCALE002",
+        help = "use the suggested pack spelling or add the spelling as an explicit alias if it is intentional"
+    }
+}
+
+# Stable diagnostic spec for an unknown or invalid reader locale.
+fn locale_unknown_spec() → DiagnosticSpec {
+    return DiagnosticSpec {
+        code = "LOCALE003",
+        help = "check the locale id is a valid reader locale directory name under the standard library reader path"
+    }
+}

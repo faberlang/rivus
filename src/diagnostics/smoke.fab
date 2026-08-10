@@ -1,0 +1,32 @@
+# rivus/src/diagnostics/smoke.fab — proba smoke tests (mirrors
+# radix-diagnostics lib.rs `smoke_tests`).
+#
+# en surface: `test` = proba, `assert` = adfirma. Tests run via
+# `faber test` (proba cases on the MIR stepper, no Cargo).
+
+import from "./span" private span
+import from "./diagnostic" private diagnostic
+
+test "span_merge_covers_both" {
+    const span.Span a ← span.span_new(0, 3)
+    const span.Span b ← span.span_new(2, 9)
+    const span.Span m ← span.span_merge(a, b)
+    assert m.start ≡ 0
+    assert m.end ≡ 9
+    assert span.span_len(m) ≡ 9
+    assert not span.span_is_empty(m)
+}
+
+test "diagnostic_builder_attaches_code_and_span" {
+    var diagnostic.Diagnostic d ← diagnostic.error("boom")
+    d ← diagnostic.with_phase(d, diagnostic.DiagnosticPhase.Lex)
+    d ← diagnostic.with_code(d, "LEX001")
+    d ← diagnostic.with_lex_kind(d, diagnostic.LexErrorKind.UnterminatedString)
+    d ← diagnostic.with_span(d, span.span_new(1, 2))
+    d ← diagnostic.with_arg(d, "issue", "sample")
+    assert diagnostic.is_error(d)
+    assert d.phase ≡ diagnostic.DiagnosticPhase.Lex
+    assert d.code not is null
+    assert d.error_kind not is null
+    assert d.span not is null
+}

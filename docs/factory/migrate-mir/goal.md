@@ -10,7 +10,7 @@
 
 ## Summary
 
-Port the scalar/control core of the `radix-mir` leaf crate and the main-crate HIR→MIR lowering into `rivus/src/mir/` in Faber (`locale = "en"`, arena-ID data model, `tabula` ordered maps, no tuples). MIR is the typed IR the Rivus stepper executes: `MirProgram`/`MirFunction`/`MirBlock`/`MirTerminator`, the value/operand/place/constant model, type helpers, names, capability vocabulary, layout table, generic binding, validation, and the `lower_analyzed_unit_with_context` pipeline (fail-closed `MirError`). The tensor/GPU/device surface is dropped per L2.
+Port the scalar/control core of the `radix-mir` leaf crate and the main-crate HIR→MIR lowering into `rivus/src/mir/` in Faber (`locale = "en"`, arena-ID data model, `tabula` ordered maps, tuples available as `tuple<T1,T2>[a, b]`). MIR is the typed IR the Rivus stepper executes: `MirProgram`/`MirFunction`/`MirBlock`/`MirTerminator`, the value/operand/place/constant model, type helpers, names, capability vocabulary, layout table, generic binding, validation, and the `lower_analyzed_unit_with_context` pipeline (fail-closed `MirError`). The tensor/GPU/device surface is dropped per L2.
 
 **Label inference:** status `planned` (STRUCTURE.md legend; pre-implementation). This goal is the mapping contract for the `src/mir/` units; body work waits on migrate-types + migrate-semantic (MIR is typed — `MirType` wraps `TypeId`).
 
@@ -53,7 +53,7 @@ Port the scalar/control core of the `radix-mir` leaf crate and the main-crate HI
 ## Port notes / frictions
 
 1. **Typed MIR needs the type table.** `MirType { semantic: TypeId, layout: Option<MirLayoutId> }`; `constant_ty`, `option_payload_ty`, `index_projection_result_ty`, `layout_kind_for_type`, `bind_generic_type_witness` all walk `TypeTable` (`get`/`primitive`/`find_sized_numeric`/`assignable`/`equals`/`index_equals`/`nullable_inner`/`type_count`/`get_index`) — requires migrate-types. Lowering additionally consumes `AnalyzedUnit` + typed `HirProgram` (migrate-semantic) and `DefId`/`Symbol`/`Span`/`Interner` (migrate-hir / lexer mirror).
-2. **Data model (L4):** `Vec<T>` → `lista<T>`; maps/sets → `tabula<K,V>` (ordered — the determinism metric); `Option<T>` → nullable union / `MirConstant::Nil`; tuples (e.g. `(place, ty)` returns) → small `class` carriers; no `char`/`Ord` — `Symbol` sorts by `u32` id; no direct recursion — arena IDs already the design.
+2. **Data model (L4):** `Vec<T>` → `lista<T>`; maps/sets → `tabula<K,V>` (ordered — the determinism metric); `Option<T>` → nullable union / `MirConstant::Nil`; tuples (e.g. `(place, ty)` returns) may port as `tuple<T1,T2>[a, b]` or named `class` carriers where a name aids clarity; no `char`/`Ord` — `Symbol` sorts by `u32` id; no direct recursion — arena IDs already the design.
 3. **en surface (L3):** identifiers port 1:1 (`MirProgram`, `MirTerminatorKind::TryCall`, `KernelModule::Solum`). Rust enums → `union`, structs → `class`, traits → plain `fn` params (no trait system).
 4. **Validation home.** `validate/` is stepper-critical. Fold context/error/enum-representation into `ty.fab`; validator + check passes into `lower.fab` (lowering returns the `ValidatedMir` token). If the stepper unit needs the checks decoupled, lift into a `validate.fab` via STRUCTURE.md update — default is the fold.
 5. **`MirRuntimeAbiFamily`** (`abi/types.rs:69`) is outside this goal's read scope but the dispatch ledger needs it; port the 15-variant enum into `capability.fab`. Full `abi/` (broadcast/contract/launch/reflection) is out of scope.

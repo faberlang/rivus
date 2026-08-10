@@ -1,6 +1,6 @@
 # Goal: migrate-diagnostics
 
-**Status**: planned — mapping complete 2026-08-10; implementation pending
+**Status**: active — pilot implementation landed 2026-08-10 (modules check green; proba smoke tests written, run deferred)
 **Created**: 2026-08-10
 **Target repo**: /Users/ianzepp/work/faberlang/rivus
 **Factory artifact dir**: docs/factory/migrate-diagnostics/
@@ -21,7 +21,7 @@ Source read: `radix/crates/radix-diagnostics/src/` (4 files, ~725 lines; no test
 - **diagnostic.rs** (~610 ln) — the core model: `DiagnosticArg` (named fact: `name: &'static str`, `value: String`); `Severity` (Error / Warning / Info); `DiagnosticPhase` (Io / Lex / Parse / Resolve / Lower / Typecheck / Analysis / Mir / Codegen / Tool, with Display→lowercase name); `LexErrorKind` (8 unit variants); `ParseErrorKind` (~30 unit variants); `WarningKind` (15 unit variants); `SemanticErrorKind` (~40 variants, ends `Warning(WarningKind)`); `PhaseErrorKind` (Lex / Parse / Semantic wrapping); `Diagnostic` struct (10 fields) + ~20 builder/accessor methods + `io_error`, `codegen_error`; free fns `diagnostic_identity`, `parse_arg_value`, `get_line_at_offset`, `nearest_char_boundary`.
 - **spec.rs** (~55 ln) — `DiagnosticSpec { code, help }` + `locale_fallback_spec` / `locale_suggestion_spec` / `locale_unknown_spec` (LOCALE001–003).
 
-Label inference: identifiers port 1:1 (hard rule L3) — `Diagnostic` → `Diagnostic`, `Span` → `Span`, etc. Rust types → en data model: `u32` → `int`, `String`/`&str` → `string`, `Vec<T>` → `list<T>`, `Option<T>` → nullable (`T ∪ null` or `optional` field), `&'static str` code → `string`. No char/ord, no tuples (data model); record types are `class`, sum types are `union` (triga pattern: `union` + `case` in `match`, free constructor fns).
+Label inference: identifiers port 1:1 (hard rule L3) — `Diagnostic` → `Diagnostic`, `Span` → `Span`, etc. Rust types → en data model: `u32` → `int`, `String`/`&str` → `string`, `Vec<T>` → `list<T>`, `Option<T>` → nullable (`T ∪ null` or `optional` field), `&'static str` code → `string`. No char/ord; record types are `class`, sum types are `union` (triga pattern: `union` + `case` in `match`, free constructor fns). Tuples ARE supported (`tuple<T1,T2>[a, b]`, EBNF `iunctaExpr`) — use them for transient pairs, prefer named `class` where the shape needs field names; verify tuple codegen in the en build on first use.
 
 ## Module mapping (crate → rivus)
 
@@ -66,3 +66,14 @@ STRUCTURE.md lists exactly two files for `src/diagnostics/`, so `spec.rs` folds 
 - `StepperError` and `MirRuntimeAbiFamily::RuntimeDiagnostic` (radix-mir-stepper) → migrate-mir-stepper.
 - Reader-locale spec consumers (driver frontmatter) → driver goal.
 - `codegen_error`, serde, `DiagnosticPhase::Codegen` behavior, file-interface export identity quirk — dropped per L1/L3 and notes above.
+
+## Pilot implementation notes (2026-08-10)
+
+The pilot unit is landed: `src/diagnostics/span.fab` + `src/diagnostics/diagnostic.fab` + `src/diagnostics/smoke.fab` (proba smoke tests, **written but not run** — `faber test` is itself under-tested; running deferred). `faber check --package .` is green. Findings that amend this goal's contract and the port conventions:
+
+1. **Import form — `§` template paths, not provider-qualified.** Rivus is a `bin` package. `import from "rivus:<mod>"` routes to the library resolver, which requires the importing package's `build.kind = "lib"` + `[library] provider` (tela pattern) and rejects bins (`PKG001:invalid_installed_library_manifest`). Bare `import from "diagnostics/span"` is an unknown scheme (`SEM006`). The working convention for same-package modules is the `§` template form: `faber.toml` `[paths.templates] src = "src"` (package-root-relative), then `import from "§src/diagnostics/diagnostic"` (coreutils pattern; `faber/src/package/import_graph.rs` `resolve_template_import`). `./`-relative also resolves, but `§src/` is the convention. **Convention change: all rivus internal imports are `§src/<path>`.** This amends STRUCTURE.md's naming-rule table and AGENTS.md's import examples.
+2. **Union variant names are module-flat.** Unlike Rust enums, Faber union variants share one module namespace: `InvalidAnnotation` (parse ∩ semantic), `InvalidAssignmentTarget` (parse ∩ semantic), `Warning` (severity ∩ semantic), `Lex`/`Parse` (phase ∩ phaseError) all collided (`SEM005:duplicate_definition`). Renamed to `SemanticInvalidAnnotation`, `SemanticInvalidAssignmentTarget`, `SemanticWarning`, `LexPhase`/`ParsePhase`/`SemanticPhase`. **All migrate-* goals must de-duplicate variant names module-wide** — plan for it in the mapping docs.
+3. **Nullable narrowing — capture, don't operate.** `if x not is null { … }` narrows only for *assignment*, not for operators or method calls: `x + "…"` and `x.longitudo()` still fail (`SEM011`/`SEM004:optional_receiver_requires_chain`) inside the block. Proven pattern (tela `browser.fab` `identities_from_nodes`): capture into a non-null binding first — `const string y ← x` inside the block, then use `y`.
+4. **Toolchain versions matter.** The installed `~/.local/bin/faber` is 1.5.0 and fails `faber check <file>` under a package tree (`PKG001:missing_library_home`) and fails to build tela. Use the in-tree binary `faber/target/debug/faber` (1.6.0-rc.1), which auto-detects the faberlang workspace as the library home via `norma/src/solum.fab`. The package-level narrow check is `faber check --package .` (validates the reachable graph from the entry — unreachable modules are NOT checked, so imported-but-unconsumed foundation modules must be imported by the entry or a lib to be verified).
+5. **Span field/module alias collision** resolved cleanly: the field is `span` (1:1 identifier) and the module alias is `span` — `span.Span` in type position vs `d.span` in field position disambiguate fine; no rename needed.
+6. **Warnings are normal.** 88 `LOCALE002` spelling-suggestion warnings (tela has 58) — the en checker suggests Latin spellings for identifiers like `start`/`end`; noise, not defects. No `WARN003` unused-function in package mode (functions are imported, so reachable).

@@ -1,0 +1,54 @@
+# rivus/src/diagnostics/span.fab — canonical Span (port of
+# radix-diagnostics/src/span.rs).
+#
+# Half-open byte ranges in original source buffers. Spans are the compiler's
+# source-location currency: they point at original bytes rather than
+# normalized interner strings so diagnostics can quote exactly what the user
+# wrote.
+#
+# This module is the canonical Span definition for the whole pipeline
+# (migrate-diagnostics decision): radix-syntax's span.rs is only the Spanned
+# provenance trait (→ migrate-syntax); radix-lexer re-exports this type
+# (→ migrate-lexer). No second Span type anywhere.
+#
+# en surface (L3): identifiers port 1:1 from radix. Rust methods are free
+# functions with the receiver as the first parameter (tela-proven pattern —
+# no self-methods on user-defined types in the en surface).
+#
+# Dropped per scope locks: serde derives (no cross-process diagnostics
+# serialization in rivus).
+
+class Span {
+    int start
+    int end
+}
+
+# Create a span from cursor-derived byte offsets.
+# Precondition: start ≤ end (radix's debug_assert; not enforced at runtime).
+fn span_new(int start, int end) → Span {
+    return Span { start = start, end = end }
+}
+
+# Zero-length span at offset 0 — the radix Default.
+fn span_default() → Span {
+    return Span { start = 0, end = 0 }
+}
+
+# Smallest span covering both inputs.
+fn span_merge(Span a, Span b) → Span {
+    var int start ← a.start
+    if b.start < start then start ← b.start
+    var int end ← a.end
+    if b.end > end then end ← b.end
+    return Span { start = start, end = end }
+}
+
+# Length of the span in bytes.
+fn span_len(Span s) → int {
+    return s.end - s.start
+}
+
+# Whether the span is empty (zero-length).
+fn span_is_empty(Span s) → bool {
+    return s.start ≡ s.end
+}

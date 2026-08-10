@@ -6,6 +6,20 @@
 #
 # P0 gate: this package builds green under `faber build .` with the en
 # reader surface declared in faber.toml ([reader] locale = "en").
+#
+# Pilot note (migrate-diagnostics): `faber check --package .` validates only
+# the reachable graph from the entry, so the foundation modules are imported
+# here to make them checkable. Their functions are not yet consumed —
+# WARN003 unused-function warnings are expected until the pipeline wires up.
+#
+# Import form: `§` template paths — `§src/<module>` resolves under
+# `[paths.templates] src = "src"` (source-root-relative, coreutils pattern).
+# NOT provider-qualified (`rivus:diagnostics/diagnostic`): provider imports
+# route to the library resolver, which requires `build.kind = "lib"` and
+# rejects bins. Bare paths are an unknown scheme (faber package/import_graph.rs).
+
+import from "§src/diagnostics/diagnostic" private diagnostic
+import from "§src/diagnostics/span" private span
 
 main {
     print "rivus: skeleton — interpreter pipeline not yet implemented"

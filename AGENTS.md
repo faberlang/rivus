@@ -14,10 +14,13 @@ crates (structure to mirror), `radix-mir-stepper` (interpreter to mirror),
   (`[reader] locale = "en"`). No per-file frontmatter needed. Keywords:
   `fn`, `const`, `let`, `var`, `class`, `union`, `enum`, `type`, `match`,
   `if`/`else`/`elif`, `while`, `for`, `return`, `import from "pkg:module"`.
-- **Module imports:** package-prefixed, subdirectories allowed —
-  `import from "rivus:lexer/token" private token` (pattern proven in
-  `triga/src/geometry.fab`). **Never inline to work around an import error;
-  fix the import.** Inlining is what killed the prior attempt.
+- **Module imports:** `§` template paths, source-root-relative —
+  `import from "§src/lexer/token" private token` (faber.toml
+  `[paths.templates] src = "src"`; coreutils pattern). Provider-qualified
+  imports (`rivus:lexer/token`) require `build.kind = "lib"` and are rejected
+  for this bin package; bare paths are an unknown scheme (see migrate-
+  diagnostics pilot notes, 2026-08-10). **Never inline to work around an
+  import error; fix the import.** Inlining is what killed the prior attempt.
 - **Entry:** `src/main.fab` (bin package, target rust).
 
 ## The pipeline (Radix mirror)

@@ -3,9 +3,18 @@ name = "rivus"
 version = "0.1.0"
 edition = "2026"
 
+# rivus is a `bin` package; internal imports use the `§` template form:
+# `[paths.templates]` maps a name to a package-root-relative directory, and
+# `import from "§src/diagnostics/diagnostic"` resolves under it (coreutils
+# pattern). Provider-qualified imports (`rivus:...`) route to the library
+# resolver, which requires `build.kind = "lib"` — not applicable here.
+
 [paths]
 source = "src"
 entry = "main.fab"
+
+[paths.templates]
+src = "src"
 
 [build]
 target = "rust"
