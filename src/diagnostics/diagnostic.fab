@@ -575,31 +575,47 @@ fn parse_arg_value(list<DiagnosticArg> args, string name) → string ∪ null {
 }
 
 # Extract the source line containing a byte offset.
-# Length is hoisted to a const local and reused for the end init, the loop
-# bound, and the break — one read, not one per iteration.
+# The line is delimited by newlines in the raw source: snap the offset to a
+# char boundary, walk back to the previous newline, walk forward to the
+# next one, and slice between them (the newline is excluded from the result).
 fn get_line_at_offset(string source, int offset) → string {
+    # LF (U+000A) is the line separator. A textus scalar index yields the
+    # codepoint as an int, so the newline test compares against 10 rather
+    # than a string — pending the radix ascii-char-index decision.
+    const int LF ← 10
+
+    # Snap to a UTF-8 char boundary, then capture the length once; both
+    # scans below bound against it.
     const int snapped ← nearest_char_boundary(source, offset)
     const int len ← source.longitudo()
+
+    # Backward scan: the line start is the byte just past the last newline
+    # before the snap (0 when the offset sits in the first line).
     var int start ← 0
     var int i ← snapped
     while i > 0 {
-        if source[i - 1] ≡ 10 {
+        if source[i - 1] ≡ LF {
             start ← i
             i ← 0
         } else {
             i ← i - 1
         }
     }
+
+    # Forward scan: the line end is the first newline at or after the snap
+    # (the full length when the last line carries no trailing newline).
     var int end ← len
     i ← snapped
     while i < len {
-        if source[i] ≡ 10 {
+        if source[i] ≡ LF {
             end ← i
             i ← len
         } else {
             i ← i + 1
         }
     }
+
+    # The line is the slice between the two bounds.
     return source.sectio(start, end)
 }
 
