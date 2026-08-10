@@ -26,13 +26,10 @@ crates (structure to mirror), `radix-mir-stepper` (interpreter to mirror),
   trailing parenthesized args — `"ref-§-§"(name, i)`, `"cannot read '§': §"(path, err)`
   (corpus `discerne.fab` multi-hole; tela single-hole). Prefer templates over
   `+` concat chains for readability.
-- **textus indexing:** `s[i]` returns the **Unicode scalar as `int`** (non-
-  allocating), NOT a 1-char string — compare `s[i] ≡ 10` (LF), never
+- **textus indexing:** `s[i]` returns the **`ascii` char type** (non-
+  allocating), NOT a 1-char string — compare `s[i] ≡ '\n'`, never
   `s[i] ≡ "\n"` (exact-type equality fails). Range slices use the `‥`
-  operator: `s[start‥end]` returns a `textus` substring. Open language
-  decision (radix `ascii-char-index` goal): index may return the `ascii`
-  char type (`'x'` literals) if `Ascii` becomes a scalar — the `≡ 10`
-  magic-number form would then read `≡ '\n'`.
+  operator: `s[start‥end]` returns a `textus` substring.
 
 ## Code style (reference-quality)
 
@@ -50,8 +47,8 @@ correct. These rules match the upcoming faber `forma` auto-format behavior:
 - **Section rhythm.** Separate logical sections with a blank line and a brief
   comment saying what the section does and why (including defaults). A
   multi-scan function should make its structure visible at a glance.
-- **Name magic numbers.** `≡ 10` becomes `const int LF ← 10` with an
-  explanation; the name is the documentation.
+- **Name magic numbers.** A bare numeric comparison gets a named constant
+  with an explanation; the name is the documentation.
 - **Hoist repeated receiver calls.** `source.longitudo()` is read once into
   `const int len` and reused — one read, single source of truth, no repeated
   calls that could disagree if the receiver ever becomes mutable.
