@@ -22,6 +22,10 @@ crates (structure to mirror), `radix-mir-stepper` (interpreter to mirror),
   diagnostics pilot notes, 2026-08-10). **Never inline to work around an
   import error; fix the import.** Inlining is what killed the prior attempt.
 - **Entry:** `src/main.fab` (bin package, target rust).
+- **String templates:** interpolate with `§` holes filled positionally by the
+  trailing parenthesized args — `"ref-§-§"(name, i)`, `"cannot read '§': §"(path, err)`
+  (corpus `discerne.fab` multi-hole; tela single-hole). Prefer templates over
+  `+` concat chains for readability.
 
 ## The pipeline (Radix mirror)
 

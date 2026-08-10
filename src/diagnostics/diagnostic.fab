@@ -513,7 +513,7 @@ fn lookup_key(Diagnostic d) → string ∪ null {
         const string ∪ null iss ← issue(d)
         if iss not is null {
             const string iss2 ← iss
-            return code2 + ":" + iss2
+            return "§:§"(code2, iss2)
         }
         return code2
     }
@@ -537,7 +537,7 @@ fn io_error(string path, string error_message) → Diagnostic {
     return Diagnostic {
         severity = Severity.Error,
         phase = DiagnosticPhase.Io,
-        message = "cannot read '" + path + "': " + error_message,
+        message = "cannot read '§': §"(path, error_message),
         code = null,
         error_kind = null,
         args = [],
@@ -560,7 +560,7 @@ fn diagnostic_identity(string code, list<DiagnosticArg> args) → string {
     if iss not is null {
         const string iss2 ← iss
         if iss2.longitudo() > 0 {
-            return code + "." + iss2
+            return "§.§"(code, iss2)
         }
     }
     return code
