@@ -575,8 +575,11 @@ fn parse_arg_value(list<DiagnosticArg> args, string name) → string ∪ null {
 }
 
 # Extract the source line containing a byte offset.
+# Length is hoisted to a const local and reused for the end init, the loop
+# bound, and the break — one read, not one per iteration.
 fn get_line_at_offset(string source, int offset) → string {
     const int snapped ← nearest_char_boundary(source, offset)
+    const int len ← source.longitudo()
     var int start ← 0
     var int i ← snapped
     while i > 0 {
@@ -587,12 +590,12 @@ fn get_line_at_offset(string source, int offset) → string {
             i ← i - 1
         }
     }
-    var int end ← source.longitudo()
+    var int end ← len
     i ← snapped
-    while i < source.longitudo() {
+    while i < len {
         if source[i] ≡ 10 {
             end ← i
-            i ← source.longitudo()
+            i ← len
         } else {
             i ← i + 1
         }
@@ -604,10 +607,13 @@ fn get_line_at_offset(string source, int offset) → string {
 # Latin/ASCII corpus: every byte offset is a char boundary, so the snap is
 # identity after clamping. Full multi-byte snapping is deferred until a
 # non-Latin input surface exists (L1 scope; see migrate-lexer).
+# Length is hoisted to a const local: one read, single source of truth for
+# the clamp (no repeated longitudo() calls that could disagree).
 fn nearest_char_boundary(string source, int offset) → int {
     var int o ← offset
+    const int len ← source.longitudo()
     if o < 0 then o ← 0
-    if o > source.longitudo() then o ← source.longitudo()
+    if o > len then o ← len
     return o
 }
 
