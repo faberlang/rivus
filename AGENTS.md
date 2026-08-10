@@ -28,8 +28,11 @@ crates (structure to mirror), `radix-mir-stepper` (interpreter to mirror),
   `+` concat chains for readability.
 - **textus indexing:** `s[i]` returns the **Unicode scalar as `int`** (non-
   allocating), NOT a 1-char string — compare `s[i] ≡ 10` (LF), never
-  `s[i] ≡ "\n"` (exact-type equality fails). `s.sectio(a, b)` builds a
-  substring for slicing; range-index spelling for slices is unresolved.
+  `s[i] ≡ "\n"` (exact-type equality fails). Range slices use the `‥`
+  operator: `s[start‥end]` returns a `textus` substring. Open language
+  decision (radix `ascii-char-index` goal): index may return the `ascii`
+  char type (`'x'` literals) if `Ascii` becomes a scalar — the `≡ 10`
+  magic-number form would then read `≡ '\n'`.
 
 ## The pipeline (Radix mirror)
 
