@@ -580,7 +580,7 @@ fn get_line_at_offset(string source, int offset) → string {
     var int start ← 0
     var int i ← snapped
     while i > 0 {
-        if source.sectio(i - 1, i) ≡ "\n" {
+        if source[i - 1] ≡ 10 {
             start ← i
             i ← 0
         } else {
@@ -590,7 +590,7 @@ fn get_line_at_offset(string source, int offset) → string {
     var int end ← source.longitudo()
     i ← snapped
     while i < source.longitudo() {
-        if source.sectio(i, i + 1) ≡ "\n" {
+        if source[i] ≡ 10 {
             end ← i
             i ← source.longitudo()
         } else {

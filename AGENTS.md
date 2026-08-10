@@ -26,6 +26,10 @@ crates (structure to mirror), `radix-mir-stepper` (interpreter to mirror),
   trailing parenthesized args — `"ref-§-§"(name, i)`, `"cannot read '§': §"(path, err)`
   (corpus `discerne.fab` multi-hole; tela single-hole). Prefer templates over
   `+` concat chains for readability.
+- **textus indexing:** `s[i]` returns the **Unicode scalar as `int`** (non-
+  allocating), NOT a 1-char string — compare `s[i] ≡ 10` (LF), never
+  `s[i] ≡ "\n"` (exact-type equality fails). `s.sectio(a, b)` builds a
+  substring for slicing; range-index spelling for slices is unresolved.
 
 ## The pipeline (Radix mirror)
 
