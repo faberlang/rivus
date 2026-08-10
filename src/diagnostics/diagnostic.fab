@@ -542,13 +542,11 @@ fn issue(Diagnostic d) → string ∪ null {
 fn lookup_key(Diagnostic d) → string ∪ null {
     const string ∪ null code ← d.code
     if code not is null {
-        const string code2 ← code
         const string ∪ null iss ← issue(d)
         if iss not is null {
-            const string iss2 ← iss
-            return "§:§"(code2, iss2)
+            return "§:§"(code, iss)
         }
-        return code2
+        return code
     }
     return null
 }
@@ -591,9 +589,8 @@ fn io_error(string path, string error_message) → Diagnostic {
 fn diagnostic_identity(string code, list<DiagnosticArg> args) → string {
     const string ∪ null iss ← parse_arg_value(args, "issue")
     if iss not is null {
-        const string iss2 ← iss
-        if iss2.longitudo() > 0 {
-            return "§.§"(code, iss2)
+        if iss.longitudo() > 0 {
+            return "§.§"(code, iss)
         }
     }
     return code
