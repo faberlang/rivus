@@ -6,7 +6,7 @@ MIR → step (the MIR stepper, Radix's `faber run` design). No codegen.
 
 Source of truth for the language: `radix/EBNF.md` (grammar), `radix/` front-end
 crates (structure to mirror), `radix-mir-stepper` (interpreter to mirror),
-`radix/stdlib/locale/en/pack.toml` (keyword surface).
+`radix/stdlib/locale/en/pack.toml` (keyword + intrinsic-method surface).
 
 ## Identity
 
@@ -14,6 +14,13 @@ crates (structure to mirror), `radix-mir-stepper` (interpreter to mirror),
   (`[reader] locale = "en"`). No per-file frontmatter needed. Keywords:
   `fn`, `const`, `let`, `var`, `class`, `union`, `enum`, `type`, `match`,
   `if`/`else`/`elif`, `while`, `for`, `return`, `import from "pkg:module"`.
+- **Intrinsic method spellings:** the en reader-locale pack maps intrinsic
+  names to English surfaces (`continet → contains`, `longitudo → length`,
+  `sectio → slice`, `appende → append`, …), so en-locale source writes
+  `.contains(c)` — e.g. `ASCII_ALNUM_CHARS.contains(c)` in
+  `is_ascii_alphanumeric`. Canonical Latin spellings (`.continet(c)`) still
+  resolve in any locale — lookup is surface-first and the canonical name is
+  the registry identity — and both spellings lower to the same intrinsic.
 - **Module imports:** `§` template paths, source-root-relative —
   `import from "§src/lexer/token" private token` (faber.toml
   `[paths.templates] src = "src"`; coreutils pattern). Provider-qualified
@@ -84,6 +91,9 @@ TypeTable). Do not skip typecheck to "make it faster."
 5. **No codegen / no MIR codegen backends.** The stepper is the only consumer.
 6. **No GPU/tensor lane.** Match Radix's reject behavior; do not implement.
 7. **en surface everywhere.** Radix identifiers port 1:1 — do not Latinize.
+   Intrinsic method calls included: en source writes `.contains(c)`,
+   `.length()`, `.slice()`, `.append()` (the pack's intrinsic surface), not
+   `.continet(c)` — though canonical spellings remain valid.
 
 ## Validation discipline (workspace rules apply)
 

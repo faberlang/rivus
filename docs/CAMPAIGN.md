@@ -78,6 +78,10 @@ lexer ─▶ parser ─▶ hir ─▶ hir/lower ─▶ semantic (collect/resolve
 
 - **en surface:** `faber.toml` `[reader] locale = "en"` — keywords are
   `fn`/`const`/`let`/`class`/`union`/`match`/…; Radix identifiers port 1:1.
+  Intrinsic method spellings follow the en pack surface too: `.contains(c)`,
+  `.length()`, `.slice()`, `.append()` (canonical Latin spellings still
+  resolve — e.g. `ASCII_ALNUM_CHARS.contains(c)` in `is_ascii_alphanumeric`
+  is the en form of `ASCII_ALNUM_CHARS.continet(c)`).
 - **Arena-ID:** all AST/HIR/MIR nodes are indices into arena vectors; no
   recursive struct fields (sidesteps the direct-recursion limitation).
 - **Source-text firewall:** lex consumes source once; every later stage works
