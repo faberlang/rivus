@@ -34,6 +34,28 @@ crates (structure to mirror), `radix-mir-stepper` (interpreter to mirror),
   char type (`'x'` literals) if `Ascii` becomes a scalar — the `≡ 10`
   magic-number form would then read `≡ '\n'`.
 
+## Code style (reference-quality)
+
+This codebase is the reference example of what Faber looks like — future LLM
+implementations pattern-match on it. Write it to be attractive, not just
+correct. These rules match the upcoming faber `forma` auto-format behavior:
+
+- **No brace cuddling.** A block-joiner (`else`, `elif`, `catch`, …) starts
+  on its own line — never `} else {`. The closing brace and the joiner are
+  separate lines. This applies to everything that attaches to a prior block,
+  not just `if`/`else`.
+- **Full-line comments only.** An inline `#` after code is a lex error
+  (`LexErrorKind::InlineComment`), so rhythm comes from blank lines plus
+  whole-line comments — never trailing notes.
+- **Section rhythm.** Separate logical sections with a blank line and a brief
+  comment saying what the section does and why (including defaults). A
+  multi-scan function should make its structure visible at a glance.
+- **Name magic numbers.** `≡ 10` becomes `const int LF ← 10` with an
+  explanation; the name is the documentation.
+- **Hoist repeated receiver calls.** `source.longitudo()` is read once into
+  `const int len` and reused — one read, single source of truth, no repeated
+  calls that could disagree if the receiver ever becomes mutable.
+
 ## The pipeline (Radix mirror)
 
 ```

@@ -597,7 +597,8 @@ fn get_line_at_offset(string source, int offset) → string {
         if source[i - 1] ≡ LF {
             start ← i
             i ← 0
-        } else {
+        }
+        else {
             i ← i - 1
         }
     }
@@ -610,7 +611,8 @@ fn get_line_at_offset(string source, int offset) → string {
         if source[i] ≡ LF {
             end ← i
             i ← len
-        } else {
+        }
+        else {
             i ← i + 1
         }
     }
