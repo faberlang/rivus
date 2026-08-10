@@ -1,6 +1,6 @@
 # Goal: migrate-lexer
 
-**Status**: active — implementation landed 2026-08-10 (check green); residuals: LexErrorKind mirror swap, keyword-row compaction
+**Status**: active — implementation landed 2026-08-10 (check green); residuals resolved (LexErrorKind mirror swapped for shared constructors; keyword rows compacted)
 **Created**: 2026-08-10
 **Target repo**: /Users/ianzepp/work/faberlang/rivus
 **Factory artifact dir**: docs/factory/migrate-lexer/
