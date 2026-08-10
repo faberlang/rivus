@@ -609,10 +609,9 @@ fn parse_arg_value(list<DiagnosticArg> args, string name) → string ∪ null {
 # char boundary, walk back to the previous newline, walk forward to the
 # next one, and slice between them (the newline is excluded from the result).
 fn get_line_at_offset(string source, int offset) → string {
-    # LF (U+000A) is the line separator. A textus scalar index yields the
-    # codepoint as an int, so the newline test compares against 10 rather
-    # than a string — pending the radix ascii-char-index decision.
-    const int LF ← 10
+    # LF (U+000A) is the line separator. Scalar index returns the ascii char
+    # type (not numerus), so the newline test compares against the '\n'
+    # literal — the closed semantics from radix's ascii-char-index work.
 
     # Snap to a UTF-8 char boundary, then capture the length once; both
     # scans below bound against it.
@@ -624,7 +623,7 @@ fn get_line_at_offset(string source, int offset) → string {
     var int start ← 0
     var int i ← snapped
     while i > 0 {
-        if source[i - 1] ≡ LF {
+        if source[i - 1] ≡ '\n' {
             start ← i
             i ← 0
         }
@@ -638,7 +637,7 @@ fn get_line_at_offset(string source, int offset) → string {
     var int end ← len
     i ← snapped
     while i < len {
-        if source[i] ≡ LF {
+        if source[i] ≡ '\n' {
             end ← i
             i ← len
         }
