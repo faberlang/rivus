@@ -6,6 +6,33 @@ are implemented. **Status: `planned` until a unit creates the file.** The
 line counts are Radix production sizes (excluding `*_test.rs`) — the port
 target, not the current state.
 
+## Naming rule (crate mirror)
+
+Directory names mirror Radix **crate** names with the `radix-` prefix stripped
+(`radix-mir-stepper` → `src/mir-stepper/`). Internal modules of the main
+`radix` crate (not separate crates) mirror their path under
+`crates/radix/src/` verbatim (`crates/radix/src/hir/lower/*.rs` →
+`src/hir/lower/*.fab`). The import surface uses the directory name with the
+`rivus:` package prefix and the file name appended:
+`src/mir-stepper/value.fab` → `import from "rivus:mir-stepper/value"`.
+
+| Radix crate | Rivus directory |
+|---|---|
+| `radix-lexer` | `src/lexer/` |
+| `radix-syntax` | `src/syntax/` |
+| `radix-parser` | `src/parser/` |
+| `radix-hir` | `src/hir/` |
+| `radix-types` | `src/types/` |
+| `radix-mir` | `src/mir/` |
+| `radix-mir-stepper` | `src/mir-stepper/` |
+| `radix-diagnostics` | `src/diagnostics/` |
+| `radix-runtime-contract` | not a dir yet — ABI constants (e.g. stepper runtime error codes) fold into the crate that uses them; a `src/runtime-contract/` appears only if a real boundary emerges |
+| `radix-mir-llvm` / `-wasm` / `-wgsl` / `-metal` / `-fmir` / `-sexp` / `-python` / `-coverage` | dropped (no codegen); would be `src/mir-<backend>/` if ever needed |
+
+Note: `diagnostics` stays `src/diagnostics/` — there is no
+`radix-mir-diagnostics` crate; `radix-diagnostics` serves the whole
+front-end. The `mir-` prefix marks only the MIR-family crates.
+
 ## Radix mirror reference
 
 | Radix location | Role |
@@ -82,7 +109,7 @@ src/
     collection_ops.fab
     generic.fab
     lower.fab         HIR → MIR lowering (mirror of mir/lower.rs, 2.5k)
-  stepper/            radix-mir-stepper mirror (~10k)
+  mir-stepper/        radix-mir-stepper mirror (~10k)
     value.fab         Value enum + arithmetic/compare/conversion ops
     runtime.fab       MirRuntimeCall evaluation (the big match)
     host.fab          Host trait + StdioHost-equivalent

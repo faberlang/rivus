@@ -1,3 +1,3 @@
-# src/stepper/kernel/ — host kernel bindings (~1.3k). Planned: solum.fab
+# src/mir-stepper/kernel/ — host kernel bindings (~1.3k). Planned: solum.fab
 # (file IO), processus.fab (subprocess), toml.fab, json.fab, aleator.fab
 # (random), args.fab. Default-reject posture per SECURITY.md. Status: planned.

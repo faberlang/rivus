@@ -70,7 +70,7 @@ lexer ─▶ parser ─▶ hir ─▶ hir/lower ─▶ semantic (collect/resolve
                                      mir/lower (typed MIR)
                                             │
                                             ▼
-                                       stepper (Value + runtime + Host kernels)
+                                       mir-stepper (Value + runtime + Host kernels)
                                             │
                                             ▼
                                      stdout / exit code / host effects

@@ -24,7 +24,7 @@ crates (structure to mirror), `radix-mir-stepper` (interpreter to mirror),
 
 ```
 source → driver (session/frontmatter) → lexer → parser → hir → hir/lower
-       → semantic (collect/resolve/typecheck/analysis) → mir/lower → stepper
+       → semantic (collect/resolve/typecheck/analysis) → mir/lower → mir-stepper
 ```
 
 MIR is **typed**: the typecheck pass runs before lowering (NumericWidth,

@@ -1,3 +1,3 @@
-# src/stepper/ — radix-mir-stepper mirror (~10k, the interpreter).
+# src/mir-stepper/ — radix-mir-stepper mirror (~10k, the interpreter).
 # Planned: value.fab, runtime.fab, host.fab, capability.fab,
 # textus_literal.fab. Status: planned.
