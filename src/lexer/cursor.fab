@@ -1,0 +1,149 @@
+# rivus/src/lexer/cursor.fab — UTF-8 cursor for lexer-owned source traversal
+# (port of radix-lexer/src/cursor.rs).
+#
+# The cursor is the narrow abstraction that lets token scanners reason in
+# Unicode scalar values while spans remain offsets into the original source
+# buffer. It deliberately does not classify tokens, normalize text, or collect
+# diagnostics; it only advances through valid boundaries and exposes small
+# lookahead primitives.
+#
+# INVARIANTS
+# - `pos` is the scalar offset of the next character to read. Faber textus
+#   indexing and `sectio` are scalar-based, so for the Latin corpus the scalar
+#   count equals the radix byte-offset span (L3). Non-ASCII input would need a
+#   separate byte counter for span parity — deferred (see goal doc port notes).
+# - Offsets returned by this cursor are valid `sectio` boundaries and can be
+#   fed back into `cursor_slice`.
+#
+# en surface (L3): Faber has no char type — a single character is a length-1
+# `string`, produced by one-scalar `sectio` slices (the norma json/lexica
+# pattern). Comparisons are textus equality (`c ≡ "."`); digit/alpha checks
+# are membership against literal digit strings (textus ordering `<` is
+# rejected by the checker as non-numeric).
+#
+# eat_while takes an accepted- or forbidden-character SET rather than a
+# predicate function: every scanner need is a membership test, and set-based
+# scanning keeps the en surface free of first-class-function dependence.
+
+class Cursor {
+    string source
+    int pos
+}
+
+# Create a new cursor at the beginning of source text.
+fn cursor_new(string source) → Cursor {
+    return Cursor { source = source, pos = 0 }
+}
+
+# Current scalar position in the original source.
+# The lexer stores spans as ints to keep tokens compact.
+fn cursor_pos(Cursor cursor) → int {
+    return cursor.pos
+}
+
+# Peek at the next character without consuming it.
+fn cursor_peek(Cursor cursor) → string ∪ null {
+    const int len ← cursor.source.longitudo()
+    if cursor.pos < len {
+        return cursor.source.sectio(cursor.pos, cursor.pos + 1)
+    }
+    return null
+}
+
+# Peek at the character after the next one without consuming either.
+# This is intentionally the deepest lookahead primitive because the lexer
+# grammar currently distinguishes only short compound tokens and decimal
+# float starts (`.` followed by a digit).
+fn cursor_peek_next(Cursor cursor) → string ∪ null {
+    const int len ← cursor.source.longitudo()
+    if cursor.pos + 1 < len {
+        return cursor.source.sectio(cursor.pos + 1, cursor.pos + 2)
+    }
+    return null
+}
+
+# Consume and return the next character.
+fn cursor_advance(Cursor cursor) → string ∪ null {
+    const string ∪ null c ← cursor_peek(cursor)
+    if c not is null {
+        const string c2 ← c
+        var Cursor cur ← cursor
+        cur.pos ← cur.pos + 1
+        return c2
+    }
+    return null
+}
+
+# Consume the next character only when it matches `expected`.
+fn cursor_eat(Cursor cursor, string expected) → bool {
+    const string ∪ null c ← cursor_peek(cursor)
+    if c not is null {
+        const string c2 ← c
+        if c2 ≡ expected {
+            var Cursor cur ← cursor
+            cur.pos ← cur.pos + 1
+            return true
+        }
+    }
+    return false
+}
+
+# Consume contiguous characters that belong to `accepted`.
+fn cursor_eat_while_in(Cursor cursor, string accepted) → vacuum {
+    var Cursor cur ← cursor
+    var bool keep ← true
+    while keep {
+        const string ∪ null c ← cursor_peek(cur)
+        if c is null {
+            keep ← false
+        }
+        else {
+            const string c2 ← c
+            if accepted.continet(c2) {
+                cur.pos ← cur.pos + 1
+            }
+            else {
+                keep ← false
+            }
+        }
+    }
+}
+
+# Consume contiguous characters that do NOT belong to `forbidden`.
+fn cursor_eat_while_not_in(Cursor cursor, string forbidden) → vacuum {
+    var Cursor cur ← cursor
+    var bool keep ← true
+    while keep {
+        const string ∪ null c ← cursor_peek(cur)
+        if c is null {
+            keep ← false
+        }
+        else {
+            const string c2 ← c
+            if forbidden.continet(c2) {
+                keep ← false
+            }
+            else {
+                cur.pos ← cur.pos + 1
+            }
+        }
+    }
+}
+
+# Whether the cursor has reached end of file.
+fn cursor_is_eof(Cursor cursor) → bool {
+    return cursor_peek(cursor) is null
+}
+
+# Source text between two cursor-derived positions.
+# Callers must pass offsets produced by this cursor; the slice is unchecked,
+# matching the cheap hot-path extraction the token scanners need.
+fn cursor_slice(Cursor cursor, int start, int end) → string {
+    return cursor.source.sectio(start, end)
+}
+
+# The unconsumed suffix of the source buffer.
+fn cursor_rest(Cursor cursor) → string {
+    const int len ← cursor.source.longitudo()
+    return cursor.source.sectio(cursor.pos, len)
+}

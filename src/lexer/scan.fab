@@ -1,0 +1,1320 @@
+# rivus/src/lexer/scan.fab — stateful scanner for Faber tokens (port of
+# radix-lexer/src/scan.rs; radix-lexer/src/lib.rs folds in here per
+# STRUCTURE.md — no lib.fab).
+#
+# Owns the tokenization state machine, line-scoped lexer modes, literal
+# parsing, identifier interning, and the lexical recovery boundary. Parser
+# recovery starts after this module emits tokens; scanner recovery is limited
+# to consuming enough source to produce the next plausible token.
+#
+# TOKENIZATION POLICY
+# - Keywords are reserved in all scanner contexts. Identifier and keyword-
+#   lookup payloads are interned as stored; literal and comment payloads are
+#   interned raw (PRP-013 — NFKC is identity on the ASCII surface, so both
+#   paths coincide). Spans point at the original source.
+# - Numeric literals are parsed during lexing so later phases receive typed
+#   values, but invalid numbers remain lexical diagnostics instead of panics.
+# - Newlines reset line-scoped modes and are emitted as explicit Newline
+#   trivia for leading-trivia attachment.
+#
+# ERROR STRATEGY
+# A malformed token emits a structured LexError, often paired with
+# TokenKind::Error, and scanning continues.
+#
+# en surface (L3): identifiers port 1:1 from radix. Pack-aware lexing
+# (`KeywordPack`, `LocaleFallback`, `LocaleSuggestion`) is dropped — the en
+# surface has one keyword set, so `reader_keyword_latin_keys` is populated
+# and `reader_type_latin_keys` stays empty. `u64`/`f64` payload bounds are
+# the en-surface `int`/`float` (i64/f64) — see the numeric parser notes.
+#
+# Variant references: token kinds and diagnostics kinds are built through
+# same-module constructors (token.token_kind_*, the local LexErrorKind)
+# because cross-module references to imported union variants do not type in
+# live code in the current faber toolchain (SEM010 — see token.fab's
+# constructor section and the LexErrorKind mirror note below).
+
+import from "§src/lexer/token" private token
+import from "§src/lexer/cursor" private cursor
+import from "§src/lexer/keywords" private keywords
+import from "§src/lexer/interner" private interner
+import from "§src/diagnostics/span" private span
+import from "§src/diagnostics/diagnostic" private diagnostic
+
+# ---------------------------------------------------------------------------
+# Constants.
+# ---------------------------------------------------------------------------
+
+# Lexer issue when `#` follows other tokens on the same logical line.
+# Stable `issue` fact for inline `#` comments after code (tests + catalogs).
+const string INLINE_COMMENT_ISSUE ← "inline_hash_after_code"
+
+# Upper bound for integer literals. radix parses u64; the en-surface `int`
+# is i64-bounded (bare numerus defaults to I64), so the overflow boundary is
+# i64::MAX. Values above it are InvalidNumber here; radix accepts them
+# through u64::MAX and the typecheck reports numerus_literal_out_of_range —
+# same program-level rejection, different lexer boundary (deviation note).
+const int INT_MAX ← 9223372036854775807
+
+# f64 range bounds for float overflow detection. `1e400` computes to +inf at
+# runtime and trips `> FLOAT_MAX`; the negated bound catches `-1e400`.
+const float FLOAT_MAX ← 1.7976931348623157e308
+const float FLOAT_MIN ← 0.0 - FLOAT_MAX
+
+# ASCII identifier/alphanumeric surfaces (L3 decision: unicode-ident XID
+# tables have no Faber equivalent — identifiers are ASCII + `_`, exact for
+# the Latin corpus; non-ASCII identifier starts are a flagged deviation).
+const string ASCII_ALNUM_CHARS ← "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+const string ASCII_ALNUM_UNDERSCORE_CHARS ← "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"
+const string IDENT_START_CHARS ← "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"
+const string IDENT_CONTINUE_CHARS ← "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+
+# ---------------------------------------------------------------------------
+# LexErrorKind — lexical failure classes.
+# ---------------------------------------------------------------------------
+
+# Mirror of diagnostic.LexErrorKind (migrate-diagnostics). The faber checker
+# cannot type cross-module references to imported union variants in live code
+# (SEM010; same family as the SEM001 imported-union-match defect), and the
+# diagnostics module defines no constructors, so the lexer owns its copy and
+# the variant names match 1:1. RECOMMENDED FIX: add one constructor function
+# per variant to diagnostic.fab (lex_error_kind_*), then swap this union for
+# the imported one — a mechanical change with no caller edits.
+union LexErrorKind {
+    UnterminatedString,
+    InvalidNumber,
+    InvalidEscape,
+    UnexpectedCharacter,
+    RemovedSectionDirective,
+    InvalidCommentSyntax,
+    InlineComment
+}
+
+# ---------------------------------------------------------------------------
+# LexError — one lexical diagnostic with a source span and named facts.
+# ---------------------------------------------------------------------------
+
+# The lexer records errors at the point where tokenization policy is
+# violated; it does not format prose or decide parse recovery.
+class LexError {
+    LexErrorKind kind
+    span.Span span
+    list<diagnostic.DiagnosticArg> args
+}
+
+# ---------------------------------------------------------------------------
+# LexResult — complete output of one lexer run.
+# ---------------------------------------------------------------------------
+
+# A result may contain errors and still carry a full token stream. That
+# split is intentional: downstream phases can attempt syntax recovery while
+# the diagnostics layer still reports precise lexical failures.
+class LexResult {
+    list<token.Token> tokens
+    list<LexError> errors
+    map<string, string> reader_keyword_latin_keys
+    map<string, string> reader_type_latin_keys
+    interner.Interner interner
+}
+
+# Whether lexing produced no diagnostics.
+fn lex_result_success(LexResult result) → bool {
+    return result.errors.longitudo() ≡ 0
+}
+
+# ---------------------------------------------------------------------------
+# Lexer — scanner state for one source buffer.
+# ---------------------------------------------------------------------------
+
+# A lexer instance owns its cursor, token buffer, diagnostics, and interner
+# so the output cannot accidentally mix symbols from another source.
+# Construct a fresh lexer per source buffer.
+class Lexer {
+    cursor.Cursor cursor
+    interner.Interner interner
+    list<token.Token> tokens
+    list<LexError> errors
+    map<string, string> reader_keyword_latin_keys
+    map<string, string> reader_type_latin_keys
+    int current_line
+    bool line_has_code
+}
+
+# Create a lexer at the beginning of `source`.
+fn lexer_new(string source) → Lexer {
+    return Lexer {
+        cursor = cursor.cursor_new(source),
+        interner = interner.interner_new(),
+        tokens = [],
+        errors = [],
+        reader_keyword_latin_keys = {},
+        reader_type_latin_keys = {},
+        current_line = 1,
+        line_has_code = false
+    }
+}
+
+# Lex one Faber source buffer into parser-ready tokens.
+# This is the convenience boundary for callers that do not need to configure
+# scanner state directly. The returned LexResult keeps the token stream,
+# collected diagnostics, and symbol table together because interned symbols
+# are meaningful only against the interner that created them.
+fn lex(string source) → LexResult {
+    var Lexer lx ← lexer_new(source)
+    return lexer_lex(lx)
+}
+
+# Consume the source and return all lexer products together.
+# The method always emits EOF after scanning the source, even if earlier
+# tokens produced diagnostics. This keeps parser entrypoints simple and makes
+# lexical failure non-fatal to syntax recovery.
+fn lexer_lex(Lexer lexer) → LexResult {
+    var Lexer lx ← lexer
+    while not cursor.cursor_is_eof(lx.cursor) {
+        scan_token(lx)
+    }
+    # Always emit EOF token for parser convenience.
+    lexer_emit_token(lx, token.token_kind_eof(), cursor.cursor_pos(lx.cursor))
+    return LexResult {
+        tokens = lx.tokens,
+        errors = lx.errors,
+        reader_keyword_latin_keys = lx.reader_keyword_latin_keys,
+        reader_type_latin_keys = lx.reader_type_latin_keys,
+        interner = lx.interner
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Token and error emission.
+# ---------------------------------------------------------------------------
+
+# Push one token spanning [start, cursor pos). Line-code state is updated
+# before the push so trivia tokens never set the flag.
+fn lexer_emit_token(Lexer lexer, token.TokenKind kind, int start) → vacuum {
+    var Lexer lx ← lexer
+    if token.token_is_line_code(kind) {
+        lx.line_has_code ← true
+    }
+    lx.tokens.appende(token.token_new(kind, span.span_new(start, cursor.cursor_pos(lx.cursor))))
+}
+
+# Record one lexical diagnostic spanning [start, cursor pos).
+fn lexer_emit_error(Lexer lexer, LexErrorKind kind, int start, list<diagnostic.DiagnosticArg> args) → vacuum {
+    var Lexer lx ← lexer
+    lx.errors.appende(LexError {
+        kind = kind,
+        span = span.span_new(start, cursor.cursor_pos(lx.cursor)),
+        args = args
+    })
+}
+
+# Record a lexical diagnostic carrying a single `issue` template fact.
+fn lexer_emit_issue_error(Lexer lexer, LexErrorKind kind, int start, string issue) → vacuum {
+    lexer_emit_error(lexer, kind, start, [issue_arg(issue)])
+}
+
+# The `issue` template fact attached to most lexical diagnostics.
+fn issue_arg(string issue) → diagnostic.DiagnosticArg {
+    return diagnostic.DiagnosticArg { name = "issue", value = issue }
+}
+
+# The `char` template fact attached to unexpected-character diagnostics.
+fn char_arg(string c) → diagnostic.DiagnosticArg {
+    return diagnostic.DiagnosticArg { name = "char", value = c }
+}
+
+# ---------------------------------------------------------------------------
+# Line breaks and line state.
+# ---------------------------------------------------------------------------
+
+# Emit one Newline token and advance the line bookkeeping.
+fn emit_line_break(Lexer lexer, int start) → vacuum {
+    var Lexer lx ← lexer
+    lx.current_line ← lx.current_line + 1
+    lx.line_has_code ← false
+    lexer_emit_token(lx, token.token_kind_newline(), start)
+}
+
+# Consume a line break when `c` starts one (`\n`, or `\r` with optional
+# `\r\n` normalization). Returns whether a break was consumed.
+fn scan_line_break(Lexer lexer, int start, string c) → bool {
+    if c ≡ "\n" {
+        emit_line_break(lexer, start)
+        return true
+    }
+    if c ≡ "\r" {
+        const string ∪ null next ← cursor.cursor_peek(lexer.cursor)
+        if next not is null {
+            const string next2 ← next
+            if next2 ≡ "\n" {
+                cursor.cursor_advance(lexer.cursor)
+            }
+        }
+        emit_line_break(lexer, start)
+        return true
+    }
+    return false
+}
+
+# ---------------------------------------------------------------------------
+# Character predicates and numeric helpers.
+# ---------------------------------------------------------------------------
+
+# Whether `c` is an ASCII decimal digit. Membership against a literal digit
+# string — the checker rejects textus ordering comparisons, so range checks
+# would not compile (norma json/lexica pattern).
+fn is_ascii_digit(string c) → bool {
+    return "0123456789".continet(c)
+}
+
+# Whether `c` is an ASCII alphanumeric.
+fn is_ascii_alphanumeric(string c) → bool {
+    return ASCII_ALNUM_CHARS.continet(c)
+}
+
+# Whether `c` can start a Faber identifier (XID-start + `_` on the ASCII
+# surface; see the L3 deviation note above).
+fn is_ident_start(string c) → bool {
+    return IDENT_START_CHARS.continet(c)
+}
+
+# Whether `c` is a non-zero digit — the F-057 underflow discriminator.
+fn is_non_zero_digit(string c) → bool {
+    return "123456789".continet(c)
+}
+
+# Whether `c` starts a float exponent separator (`e` / `E`).
+fn is_exp_marker(string c) → bool {
+    return c ≡ "e" or c ≡ "E"
+}
+
+# Numeric value of one digit character, in any of the supported radices.
+# Returns null for non-digits (Faber has no ord intrinsic — lookup table).
+fn digit_value(string c) → int ∪ null {
+    if c ≡ "0" then return 0
+    if c ≡ "1" then return 1
+    if c ≡ "2" then return 2
+    if c ≡ "3" then return 3
+    if c ≡ "4" then return 4
+    if c ≡ "5" then return 5
+    if c ≡ "6" then return 6
+    if c ≡ "7" then return 7
+    if c ≡ "8" then return 8
+    if c ≡ "9" then return 9
+    if c ≡ "a" then return 10
+    if c ≡ "b" then return 11
+    if c ≡ "c" then return 12
+    if c ≡ "d" then return 13
+    if c ≡ "e" then return 14
+    if c ≡ "f" then return 15
+    if c ≡ "A" then return 10
+    if c ≡ "B" then return 11
+    if c ≡ "C" then return 12
+    if c ≡ "D" then return 13
+    if c ≡ "E" then return 14
+    if c ≡ "F" then return 15
+    return null
+}
+
+# One uppercase hex nibble character for `d` in 0..=15.
+fn hex_digit(int d) → string {
+    if d ≡ 0 then return "0"
+    if d ≡ 1 then return "1"
+    if d ≡ 2 then return "2"
+    if d ≡ 3 then return "3"
+    if d ≡ 4 then return "4"
+    if d ≡ 5 then return "5"
+    if d ≡ 6 then return "6"
+    if d ≡ 7 then return "7"
+    if d ≡ 8 then return "8"
+    if d ≡ 9 then return "9"
+    if d ≡ 10 then return "A"
+    if d ≡ 11 then return "B"
+    if d ≡ 12 then return "C"
+    if d ≡ 13 then return "D"
+    if d ≡ 14 then return "E"
+    if d ≡ 15 then return "F"
+    return "0"
+}
+
+# Strip `_` separators from numeric source text.
+fn clean_numeric_text(string text) → string {
+    const int len ← text.longitudo()
+    var string out ← ""
+    var int i ← 0
+    while i < len {
+        const string c ← text.sectio(i, i + 1)
+        if c ≠ "_" {
+            out ← "§§"(out, c)
+        }
+        i ← i + 1
+    }
+    return out
+}
+
+# Whether `text` contains at least one non-zero digit in the significand
+# (the part before any `e`/`E` exponent separator). Used to distinguish true
+# zero (`0e-400`) from underflow (`1e-400`).
+fn has_non_zero_significand(string text) → bool {
+    const int len ← text.longitudo()
+    var int i ← 0
+    while i < len {
+        const string c ← text.sectio(i, i + 1)
+        if c ≡ "e" or c ≡ "E" {
+            break
+        }
+        if is_non_zero_digit(c) {
+            return true
+        }
+        i ← i + 1
+    }
+    return false
+}
+
+# Parse unsigned integer text in `radix`, rejecting overflow and non-digit
+# characters. Digit-by-digit accumulation replaces radix's
+# `u64::from_str_radix` (no stdlib equivalent on the en surface).
+fn parse_radix_uint(string clean, int radix) → int ∪ null {
+    const int len ← clean.longitudo()
+    var int acc ← 0
+    var int i ← 0
+    while i < len {
+        const string c ← clean.sectio(i, i + 1)
+        const int ∪ null d ← digit_value(c)
+        if d is null {
+            return null
+        }
+        const int d2 ← d
+        # Overflow guard: the step is safe iff acc ≤ (INT_MAX - d) / radix.
+        if acc > (INT_MAX - d2) / radix {
+            return null
+        }
+        acc ← acc * radix + d2
+        i ← i + 1
+    }
+    return acc
+}
+
+# Parse decimal unsigned integer text (the plain integer path).
+fn parse_uint(string clean) → int ∪ null {
+    return parse_radix_uint(clean, 10)
+}
+
+# Parse a decimal float from cleaned text (significand `.` fraction, then
+# optional `e`/`E` exponent). Returns null on structural failures — the
+# caller reports InvalidNumber with the precise issue.
+#
+# Precision note: the significand is accumulated as an int capped at 17
+# significant digits, then scaled by powers of ten. This matches Rust's
+# `parse::<f64>` to well within f64 precision for ordinary literals; the
+# boundary cases that radix tests (overflow, underflow, trailing garbage)
+# are decided exactly.
+fn parse_float(string clean) → float ∪ null {
+    const int len ← clean.longitudo()
+    var int i ← 0
+    var int sig ← 0
+    var int digits ← 0
+    var int frac_digits ← 0
+    var int skipped_pre_dot ← 0
+    var bool seen_dot ← false
+    var bool done ← false
+    while not done {
+        if i ≥ len {
+            done ← true
+        }
+        else {
+            const string c ← clean.sectio(i, i + 1)
+            if c ≡ "." {
+                if seen_dot {
+                    return null
+                }
+                seen_dot ← true
+                i ← i + 1
+            }
+            elif is_exp_marker(c) {
+                done ← true
+            }
+            else {
+                const int ∪ null d ← digit_value(c)
+                if d is null {
+                    return null
+                }
+                if digits < 17 {
+                    const int d2 ← d
+                    sig ← sig * 10 + d2
+                    digits ← digits + 1
+                    if seen_dot {
+                        frac_digits ← frac_digits + 1
+                    }
+                }
+                else {
+                    # Beyond 17 significant digits the accumulator cannot
+                    # grow precisely; integer-part digits still change the
+                    # magnitude, so count them into the final exponent.
+                    if not seen_dot {
+                        skipped_pre_dot ← skipped_pre_dot + 1
+                    }
+                }
+                i ← i + 1
+            }
+        }
+    }
+    if digits ≡ 0 {
+        return null
+    }
+    var int scale ← 0 - frac_digits + skipped_pre_dot
+    # Exponent: `e`/`E`, optional sign, then one or more digits.
+    if i < len {
+        i ← i + 1
+        var int exp_sign ← 1
+        if i < len {
+            const string s ← clean.sectio(i, i + 1)
+            if s ≡ "-" {
+                exp_sign ← -1
+                i ← i + 1
+            }
+            elif s ≡ "+" {
+                i ← i + 1
+            }
+        }
+        var int exp ← 0
+        var int exp_digits ← 0
+        var bool exp_done ← false
+        while not exp_done {
+            if i ≥ len {
+                exp_done ← true
+            }
+            else {
+                const int ∪ null d ← digit_value(clean.sectio(i, i + 1))
+                if d is null {
+                    return null
+                }
+                const int d2 ← d
+                exp ← exp * 10 + d2
+                exp_digits ← exp_digits + 1
+                i ← i + 1
+            }
+        }
+        if exp_digits ≡ 0 {
+            return null
+        }
+        scale ← scale + exp * exp_sign
+    }
+    # Bound the exponent application: beyond ±400 the result is guaranteed
+    # infinite (positive) or zero (negative), so capping keeps pathological
+    # exponents finite to scan.
+    if scale > 400 {
+        scale ← 400
+    }
+    if scale < 0 - 400 {
+        scale ← 0 - 400
+    }
+    var float value ← 0.0
+    value ← value + (sig ↦ float)
+    var int k ← 0
+    while k < scale {
+        value ← value * 10.0
+        k ← k + 1
+    }
+    k ← 0
+    while k < 0 - scale {
+        value ← value / 10.0
+        k ← k + 1
+    }
+    return value
+}
+
+# ---------------------------------------------------------------------------
+# Scanner dispatch.
+# ---------------------------------------------------------------------------
+
+# Scan one token or recoverable lexical error from the current position.
+# This is the scanner's dispatch boundary. Specialized scanners own
+# token-family policy, while this method owns mode reset, whitespace, and
+# fallback behavior for characters with no token meaning.
+fn scan_token(Lexer lexer) → vacuum {
+    var Lexer lx ← lexer
+    const int start ← cursor.cursor_pos(lx.cursor)
+    const string ∪ null c ← cursor.cursor_advance(lx.cursor)
+    if c is null {
+        return
+    }
+    const string c2 ← c
+    if scan_line_break(lx, start, c2) {
+        return
+    }
+    if c2 ≡ " " or c2 ≡ "\t" {
+        return
+    }
+    if c2 ≡ "(" {
+        lexer_emit_token(lx, token.token_kind_lparen(), start)
+        return
+    }
+    if c2 ≡ ")" {
+        lexer_emit_token(lx, token.token_kind_rparen(), start)
+        return
+    }
+    if c2 ≡ "{" {
+        lexer_emit_token(lx, token.token_kind_lbrace(), start)
+        return
+    }
+    if c2 ≡ "}" {
+        lexer_emit_token(lx, token.token_kind_rbrace(), start)
+        return
+    }
+    if c2 ≡ "[" {
+        lexer_emit_token(lx, token.token_kind_lbracket(), start)
+        return
+    }
+    if c2 ≡ "]" {
+        lexer_emit_token(lx, token.token_kind_rbracket(), start)
+        return
+    }
+    if c2 ≡ "," {
+        lexer_emit_token(lx, token.token_kind_comma(), start)
+        return
+    }
+    if c2 ≡ ":" {
+        lexer_emit_token(lx, token.token_kind_colon(), start)
+        return
+    }
+    if c2 ≡ ";" {
+        lexer_emit_token(lx, token.token_kind_semicolon(), start)
+        return
+    }
+    if c2 ≡ "@" {
+        lexer_emit_token(lx, token.token_kind_at(), start)
+        return
+    }
+    if c2 ≡ "§" {
+        lexer_emit_error(lx, LexErrorKind.RemovedSectionDirective, start, [issue_arg("removed_section_directive")])
+        lexer_emit_token(lx, token.token_kind_error(), start)
+        return
+    }
+    if c2 ≡ "#" {
+        scan_hash_comment(lx, start)
+        return
+    }
+    if c2 ≡ "\"" {
+        scan_string(lx, start)
+        return
+    }
+    if c2 ≡ "'" {
+        scan_ascii_string(lx, start)
+        return
+    }
+    if c2 ≡ "`" {
+        scan_backtick_string(lx, start)
+        return
+    }
+    if c2 ≡ "|" {
+        scan_octeti_string(lx, start)
+        return
+    }
+    if c2 ≡ "«" {
+        scan_guillemet_block_string(lx, start)
+        return
+    }
+    if c2 ≡ "/" {
+        scan_slash(lx, start)
+        return
+    }
+    if is_ascii_digit(c2) {
+        scan_number(lx, start, c2)
+        return
+    }
+    if is_ident_start(c2) {
+        scan_identifier(lx, start)
+        return
+    }
+    const token.TokenKind ∪ null kind ← scan_operator(lx, c2)
+    if kind not is null {
+        const token.TokenKind kind2 ← kind
+        lexer_emit_token(lx, kind2, start)
+        return
+    }
+    lexer_emit_error(lx, LexErrorKind.UnexpectedCharacter, start, [issue_arg("unexpected_character"), char_arg(diagnostic_char(c2))])
+    lexer_emit_token(lx, token.token_kind_error(), start)
+}
+
+# ---------------------------------------------------------------------------
+# Operator scanner.
+# ---------------------------------------------------------------------------
+
+# Classify one operator glyph, consuming compound lookahead (`!`/`?` forms)
+# when present. Returns null when `c` has no token meaning.
+fn scan_operator(Lexer lexer, string c) → token.TokenKind ∪ null {
+    var Lexer lx ← lexer
+    if c ≡ "." {
+        return token.token_kind_dot()
+    }
+    if c ≡ "‥" {
+        return token.token_kind_dotdot()
+    }
+    if c ≡ "…" {
+        return token.token_kind_ellipsis()
+    }
+    if c ≡ "∧" {
+        return token.token_kind_bitwiseand()
+    }
+    if c ≡ "∨" {
+        return token.token_kind_bitwiseor()
+    }
+    if c ≡ "⊻" {
+        return token.token_kind_bitwisexor()
+    }
+    if c ≡ "¬" {
+        return token.token_kind_bitwisenot()
+    }
+    if c ≡ "⇐" {
+        return token.token_kind_bitwiseshl()
+    }
+    if c ≡ "⇒" {
+        return token.token_kind_bitwiseshr()
+    }
+    if c ≡ "↦" {
+        return token.token_kind_conversio()
+    }
+    if c ≡ "↤" {
+        return token.token_kind_conversioassign()
+    }
+    if c ≡ "⊕" {
+        return token.token_kind_postinc()
+    }
+    if c ≡ "⊖" {
+        return token.token_kind_postdec()
+    }
+    if c ≡ "∷" {
+        return token.token_kind_verte()
+    }
+    if c ≡ "∴" {
+        return token.token_kind_therefore()
+    }
+    if c ≡ "∪" {
+        return token.token_kind_cup()
+    }
+    if c ≡ "+" {
+        return token.token_kind_plus()
+    }
+    if c ≡ "*" {
+        return token.token_kind_star()
+    }
+    if c ≡ "%" {
+        return token.token_kind_percent()
+    }
+    if c ≡ "-" {
+        return token.token_kind_minus()
+    }
+    if c ≡ "=" {
+        return token.token_kind_eq()
+    }
+    if c ≡ "!" {
+        if cursor.cursor_eat(lx.cursor, ".") {
+            return token.token_kind_bangdot()
+        }
+        if cursor.cursor_eat(lx.cursor, "[") {
+            return token.token_kind_bangbracket()
+        }
+        if cursor.cursor_eat(lx.cursor, "(") {
+            return token.token_kind_bangparen()
+        }
+        return token.token_kind_bang()
+    }
+    if c ≡ "<" {
+        return token.token_kind_ltascii()
+    }
+    if c ≡ ">" {
+        return token.token_kind_gtascii()
+    }
+    if c ≡ "≺" {
+        return token.token_kind_lt()
+    }
+    if c ≡ "≻" {
+        return token.token_kind_gt()
+    }
+    if c ≡ "←" {
+        return token.token_kind_assign()
+    }
+    if c ≡ "≡" {
+        return token.token_kind_eqeq()
+    }
+    if c ≡ "≈" {
+        return token.token_kind_approxeq()
+    }
+    if c ≡ "≉" {
+        return token.token_kind_approxnoteq()
+    }
+    if c ≡ "≠" {
+        return token.token_kind_bangeq()
+    }
+    if c ≡ "≤" {
+        return token.token_kind_lteq()
+    }
+    if c ≡ "≥" {
+        return token.token_kind_gteq()
+    }
+    if c ≡ "→" {
+        return token.token_kind_arrow()
+    }
+    if c ≡ "⇥" {
+        return token.token_kind_exitarrow()
+    }
+    if c ≡ "?" {
+        if cursor.cursor_eat(lx.cursor, ".") {
+            return token.token_kind_questiondot()
+        }
+        if cursor.cursor_eat(lx.cursor, "[") {
+            return token.token_kind_questionbracket()
+        }
+        if cursor.cursor_eat(lx.cursor, "(") {
+            return token.token_kind_questionparen()
+        }
+        return token.token_kind_question()
+    }
+    return null
+}
+
+# ---------------------------------------------------------------------------
+# Comment scanners.
+# ---------------------------------------------------------------------------
+
+# Scan a hash comment, the only source comment form currently accepted.
+# `#` must be the first non-whitespace token on the logical line. Mid-line
+# `#` after code is a lexical error so comments stay line-start trivia.
+fn scan_hash_comment(Lexer lexer, int start) → vacuum {
+    var Lexer lx ← lexer
+    if lx.line_has_code {
+        reject_inline_hash_comment(lx, start)
+        return
+    }
+    cursor.cursor_eat_while_not_in(lx.cursor, "\n\r")
+    const string text ← cursor.cursor_slice(lx.cursor, start + 1, cursor.cursor_pos(lx.cursor))
+    # Comment payloads preserve source bytes (PRP-013); do not NFKC. radix
+    # trims trailing whitespace before interning (`trim_end`).
+    const string trimmed ← trim_end(text)
+    const token.Symbol sym ← interner.interner_intern_raw(lx.interner, trimmed)
+    lexer_emit_token(lx, token.token_kind_line_comment(sym), start)
+}
+
+# Reject a `#` that follows code on the same logical line.
+fn reject_inline_hash_comment(Lexer lexer, int start) → vacuum {
+    var Lexer lx ← lexer
+    cursor.cursor_eat_while_not_in(lx.cursor, "\n\r")
+    lexer_emit_issue_error(lx, LexErrorKind.InlineComment, start, INLINE_COMMENT_ISSUE)
+    lexer_emit_token(lx, token.token_kind_error(), start)
+}
+
+# Strip trailing space and tab characters from comment text.
+# radix's `str::trim_end` strips Unicode whitespace; space/tab covers the
+# Latin corpus (approximation note).
+fn trim_end(string text) → string {
+    const int len ← text.longitudo()
+    var int end ← len
+    var bool done ← false
+    while not done {
+        if end > 0 {
+            const string c ← text.sectio(end - 1, end)
+            if c ≡ " " or c ≡ "\t" {
+                end ← end - 1
+            }
+            else {
+                done ← true
+            }
+        }
+        else {
+            done ← true
+        }
+    }
+    return text.sectio(0, end)
+}
+
+# Scan `/` as division or reject C-style comment openers with a migration
+# hint. WHY: `//` and `/* */` are not Faber trivia; emitting two Slash
+# tokens would leave the parser reporting a useless "expected expression".
+fn scan_slash(Lexer lexer, int start) → vacuum {
+    var Lexer lx ← lexer
+    const string ∪ null nxt ← cursor.cursor_peek(lx.cursor)
+    if nxt not is null {
+        const string nxt2 ← nxt
+        if nxt2 ≡ "/" {
+            cursor.cursor_advance(lx.cursor)
+            cursor.cursor_eat_while_not_in(lx.cursor, "\n\r")
+            lexer_emit_issue_error(lx, LexErrorKind.InvalidCommentSyntax, start, "c_style_line_comment")
+            lexer_emit_token(lx, token.token_kind_error(), start)
+            return
+        }
+        if nxt2 ≡ "*" {
+            cursor.cursor_advance(lx.cursor)
+            var bool terminated ← false
+            var bool done ← false
+            while not done {
+                const string ∪ null c ← cursor.cursor_advance(lx.cursor)
+                if c is null {
+                    done ← true
+                }
+                else {
+                    const string c2 ← c
+                    # F-058: track newlines inside /* */ so line numbers
+                    # remain correct for subsequent diagnostics.
+                    if c2 ≡ "\n" {
+                        lx.current_line ← lx.current_line + 1
+                    }
+                    if c2 ≡ "*" and cursor.cursor_eat(lx.cursor, "/") {
+                        terminated ← true
+                        done ← true
+                    }
+                }
+            }
+            var string issue ← "unterminated_c_style_block_comment"
+            if terminated {
+                issue ← "c_style_block_comment"
+            }
+            lexer_emit_issue_error(lx, LexErrorKind.InvalidCommentSyntax, start, issue)
+            lexer_emit_token(lx, token.token_kind_error(), start)
+            return
+        }
+    }
+    lexer_emit_token(lx, token.token_kind_slash(), start)
+}
+
+# ---------------------------------------------------------------------------
+# String scanners.
+# ---------------------------------------------------------------------------
+
+# Scan a single-line string literal delimited by double quotes.
+# Single-line strings recover at newline or EOF. Escape handling is
+# intentionally shallow here: the scanner skips a backslash plus the next
+# character so delimiter search stays correct, but it does not validate an
+# escape vocabulary.
+fn scan_string(Lexer lexer, int start) → vacuum {
+    var Lexer lx ← lexer
+    var bool terminated ← false
+    var bool done ← false
+    while not done {
+        const string ∪ null c ← cursor.cursor_peek(lx.cursor)
+        if c is null {
+            lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "unterminated_string_literal")
+            done ← true
+        }
+        else {
+            const string c2 ← c
+            if c2 ≡ "\n" or c2 ≡ "\r" {
+                lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "newline_in_string_literal")
+                done ← true
+            }
+            elif c2 ≡ "\\" {
+                # PRP-014: `\<newline>` in single-line literals must not
+                # consume the newline inside the escape skip. Advance past
+                # just the backslash so the next iteration hits the newline
+                # rejection branch below.
+                const string ∪ null nxt ← cursor.cursor_peek_next(lx.cursor)
+                if nxt not is null {
+                    const string nxt2 ← nxt
+                    if nxt2 ≡ "\n" or nxt2 ≡ "\r" {
+                        cursor.cursor_advance(lx.cursor)
+                    }
+                    else {
+                        skip_escaped_char(lx)
+                    }
+                }
+                else {
+                    cursor.cursor_advance(lx.cursor)
+                }
+            }
+            elif c2 ≡ "\"" {
+                cursor.cursor_advance(lx.cursor)
+                terminated ← true
+                done ← true
+            }
+            else {
+                cursor.cursor_advance(lx.cursor)
+            }
+        }
+    }
+    const token.Symbol sym ← finish_delimited_literal(lx, start, 1, 1, terminated)
+    lexer_emit_token(lx, token.token_kind_string(sym), start)
+}
+
+# Scan a single-line `ascii` literal delimited by single quotes.
+fn scan_ascii_string(Lexer lexer, int start) → vacuum {
+    var Lexer lx ← lexer
+    var bool terminated ← false
+    var bool done ← false
+    while not done {
+        const string ∪ null c ← cursor.cursor_peek(lx.cursor)
+        if c is null {
+            lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "unterminated_ascii_literal")
+            done ← true
+        }
+        else {
+            const string c2 ← c
+            if c2 ≡ "\n" or c2 ≡ "\r" {
+                lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "newline_in_ascii_literal")
+                done ← true
+            }
+            elif c2 ≡ "\\" {
+                const string ∪ null nxt ← cursor.cursor_peek_next(lx.cursor)
+                if nxt not is null {
+                    const string nxt2 ← nxt
+                    if nxt2 ≡ "\n" or nxt2 ≡ "\r" {
+                        cursor.cursor_advance(lx.cursor)
+                    }
+                    else {
+                        skip_escaped_char(lx)
+                    }
+                }
+                else {
+                    cursor.cursor_advance(lx.cursor)
+                }
+            }
+            elif c2 ≡ "'" {
+                cursor.cursor_advance(lx.cursor)
+                terminated ← true
+                done ← true
+            }
+            else {
+                cursor.cursor_advance(lx.cursor)
+            }
+        }
+    }
+    const token.Symbol sym ← finish_delimited_literal(lx, start, 1, 1, terminated)
+    lexer_emit_token(lx, token.token_kind_ascii_string(sym), start)
+}
+
+# Scan a captured `forma` template literal delimited by backticks.
+# Backtick templates may span multiple lines. Escape handling follows the
+# same shallow skip policy as `scan_string`.
+fn scan_backtick_string(Lexer lexer, int start) → vacuum {
+    var Lexer lx ← lexer
+    var bool terminated ← false
+    var bool done ← false
+    while not done {
+        const string ∪ null c ← cursor.cursor_peek(lx.cursor)
+        if c is null {
+            lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "unterminated_backtick_template_literal")
+            done ← true
+        }
+        else {
+            const string c2 ← c
+            if c2 ≡ "\\" {
+                skip_escaped_char(lx)
+            }
+            elif c2 ≡ "`" {
+                cursor.cursor_advance(lx.cursor)
+                terminated ← true
+                done ← true
+            }
+            elif c2 ≡ "\n" {
+                lx.current_line ← lx.current_line + 1
+                cursor.cursor_advance(lx.cursor)
+            }
+            else {
+                cursor.cursor_advance(lx.cursor)
+            }
+        }
+    }
+    const token.Symbol sym ← finish_delimited_literal(lx, start, 1, 1, terminated)
+    lexer_emit_token(lx, token.token_kind_backtick_string(sym), start)
+}
+
+# Scan a compile-time `octeti` literal delimited by ASCII pipes.
+# Interior content is raw hex text plus whitespace. `||` is the empty
+# literal. Validation of hex pairs happens during semantic analysis.
+fn scan_octeti_string(Lexer lexer, int start) → vacuum {
+    var Lexer lx ← lexer
+    var bool terminated ← false
+    var bool done ← false
+    while not done {
+        const string ∪ null c ← cursor.cursor_peek(lx.cursor)
+        if c is null {
+            lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "unterminated_octeti_literal")
+            done ← true
+        }
+        else {
+            const string c2 ← c
+            if c2 ≡ "|" {
+                cursor.cursor_advance(lx.cursor)
+                terminated ← true
+                done ← true
+            }
+            elif c2 ≡ "\n" {
+                lx.current_line ← lx.current_line + 1
+                cursor.cursor_advance(lx.cursor)
+            }
+            else {
+                cursor.cursor_advance(lx.cursor)
+            }
+        }
+    }
+    const token.Symbol sym ← finish_delimited_literal(lx, start, 1, 1, terminated)
+    lexer_emit_token(lx, token.token_kind_octeti_string(sym), start)
+}
+
+# Scan a block `textus` literal delimited by guillemets `«` and `»`.
+# Block strings may contain newlines and unescaped `"` characters. Backslash
+# escapes follow the same shallow skip policy as `scan_string`. Emits the
+# ordinary String kind (radix behavior).
+fn scan_guillemet_block_string(Lexer lexer, int start) → vacuum {
+    var Lexer lx ← lexer
+    var bool terminated ← false
+    var bool done ← false
+    while not done {
+        const string ∪ null c ← cursor.cursor_peek(lx.cursor)
+        if c is null {
+            lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "unterminated_guillemet_block_string_literal")
+            done ← true
+        }
+        else {
+            const string c2 ← c
+            if c2 ≡ "\\" {
+                skip_escaped_char(lx)
+            }
+            elif c2 ≡ "»" {
+                cursor.cursor_advance(lx.cursor)
+                terminated ← true
+                done ← true
+            }
+            elif c2 ≡ "\n" {
+                lx.current_line ← lx.current_line + 1
+                cursor.cursor_advance(lx.cursor)
+            }
+            else {
+                cursor.cursor_advance(lx.cursor)
+            }
+        }
+    }
+    const token.Symbol sym ← finish_delimited_literal(lx, start, 1, 1, terminated)
+    lexer_emit_token(lx, token.token_kind_string(sym), start)
+}
+
+# Skip one shallow escape sequence (`\` plus the next source character).
+fn skip_escaped_char(Lexer lexer) → vacuum {
+    cursor.cursor_advance(lexer.cursor)
+    cursor.cursor_advance(lexer.cursor)
+}
+
+# Intern a delimited literal payload after the closing delimiter is found or
+# recovery ends. All current delimiters are one scalar each, so `open_len`
+# and `close_len` are 1 on the scalar-based cursor (radix counts guillemet
+# bytes — the scalar/byte difference is covered by the L3 span decision).
+fn finish_delimited_literal(Lexer lexer, int start, int open_len, int close_len, bool terminated) → token.Symbol {
+    var int suffix_len ← 0
+    if terminated {
+        suffix_len ← close_len
+    }
+    return extract_and_intern(lexer, start, open_len, suffix_len)
+}
+
+# Intern the interior of a delimited literal as raw source text.
+fn extract_and_intern(Lexer lexer, int start, int prefix_len, int suffix_len) → token.Symbol {
+    var Lexer lx ← lexer
+    const int content_start ← start + prefix_len
+    const int content_end ← cursor.cursor_pos(lx.cursor) - suffix_len
+    const string text ← cursor.cursor_slice(lx.cursor, content_start, content_end)
+    # Literal payloads preserve source bytes (PRP-013); do not NFKC.
+    return interner.interner_intern_raw(lx.interner, text)
+}
+
+# ---------------------------------------------------------------------------
+# Number scanner.
+# ---------------------------------------------------------------------------
+
+# Scan a numeric literal and store its parsed value in the token.
+# Faber accepts decimal integers/floats, exponent forms, radix-prefixed
+# integers, and `_` separators. A `.` starts a float only when followed by a
+# digit, preserving member access and range tokens after integers.
+fn scan_number(Lexer lexer, int start, string first) → vacuum {
+    var Lexer lx ← lexer
+    if first ≡ "0" {
+        const string ∪ null nxt ← cursor.cursor_peek(lx.cursor)
+        if nxt not is null {
+            const string nxt2 ← nxt
+            if nxt2 ≡ "x" or nxt2 ≡ "X" {
+                cursor.cursor_advance(lx.cursor)
+                scan_radix_int(lx, start, 16, "0123456789abcdefABCDEF", "invalid_hexadecimal_number")
+                return
+            }
+            if nxt2 ≡ "b" or nxt2 ≡ "B" {
+                cursor.cursor_advance(lx.cursor)
+                scan_radix_int(lx, start, 2, "01", "invalid_binary_number")
+                return
+            }
+            if nxt2 ≡ "o" or nxt2 ≡ "O" {
+                cursor.cursor_advance(lx.cursor)
+                scan_radix_int(lx, start, 8, "01234567", "invalid_octal_number")
+                return
+            }
+        }
+    }
+    cursor.cursor_eat_while_in(lx.cursor, "0123456789_")
+    var bool is_float ← false
+    const string ∪ null dot ← cursor.cursor_peek(lx.cursor)
+    const string ∪ null after_dot ← cursor.cursor_peek_next(lx.cursor)
+    if dot not is null {
+        const string dot2 ← dot
+        if dot2 ≡ "." {
+            if after_dot not is null {
+                const string after_dot2 ← after_dot
+                if is_ascii_digit(after_dot2) {
+                    cursor.cursor_advance(lx.cursor)
+                    cursor.cursor_eat_while_in(lx.cursor, "0123456789_")
+                    is_float ← true
+                }
+            }
+        }
+    }
+    var bool has_exp ← false
+    const string ∪ null e ← cursor.cursor_peek(lx.cursor)
+    if e not is null {
+        const string e2 ← e
+        if e2 ≡ "e" or e2 ≡ "E" {
+            cursor.cursor_advance(lx.cursor)
+            if not cursor.cursor_eat(lx.cursor, "+") {
+                cursor.cursor_eat(lx.cursor, "-")
+            }
+            cursor.cursor_eat_while_in(lx.cursor, "0123456789_")
+            has_exp ← true
+        }
+    }
+    const string text ← cursor.cursor_slice(lx.cursor, start, cursor.cursor_pos(lx.cursor))
+    const string clean ← clean_numeric_text(text)
+    if is_float or has_exp {
+        const float ∪ null f ← parse_float(clean)
+        if f is null {
+            lexer_emit_issue_error(lx, LexErrorKind.InvalidNumber, start, "invalid_floating_point_number")
+            lexer_emit_token(lx, token.token_kind_error(), start)
+        }
+        else {
+            const float f2 ← f
+            if f2 > FLOAT_MAX or f2 < FLOAT_MIN {
+                lexer_emit_issue_error(lx, LexErrorKind.InvalidNumber, start, "float_overflow")
+                lexer_emit_token(lx, token.token_kind_error(), start)
+            }
+            elif f2 ≡ 0.0 and has_non_zero_significand(clean) {
+                # F-057: underflow to 0.0 must produce a diagnostic when the
+                # significand is non-zero (true zero like 0e-400 is fine).
+                lexer_emit_issue_error(lx, LexErrorKind.InvalidNumber, start, "float_underflow")
+                lexer_emit_token(lx, token.token_kind_error(), start)
+            }
+            else {
+                lexer_emit_token(lx, token.token_kind_float(f2), start)
+            }
+        }
+    }
+    else {
+        const int ∪ null n ← parse_uint(clean)
+        if n not is null {
+            const int n2 ← n
+            lexer_emit_token(lx, token.token_kind_integer(n2), start)
+        }
+        else {
+            lexer_emit_issue_error(lx, LexErrorKind.InvalidNumber, start, "invalid_integer")
+            lexer_emit_token(lx, token.token_kind_error(), start)
+        }
+    }
+}
+
+# Scan a radix-prefixed integer (`0x…`, `0b…`, `0o…`) with `_` separators.
+# `digit_set` is the radix's digit characters; `issue` is the catalog issue
+# for F-056 trailing garbage and overflow.
+fn scan_radix_int(Lexer lexer, int start, int radix, string digit_set, string issue) → vacuum {
+    var Lexer lx ← lexer
+    cursor.cursor_eat_while_in(lx.cursor, "§§"(digit_set, "_"))
+    # F-056: trailing digits (or letters that look numeric-adjacent) that
+    # fail the radix predicate must not leak as separate tokens. Consume
+    # them and emit an error instead.
+    const string ∪ null c ← cursor.cursor_peek(lx.cursor)
+    if c not is null {
+        const string c2 ← c
+        if is_ascii_alphanumeric(c2) and not digit_set.continet(c2) {
+            cursor.cursor_eat_while_in(lx.cursor, ASCII_ALNUM_UNDERSCORE_CHARS)
+            lexer_emit_issue_error(lx, LexErrorKind.InvalidNumber, start, issue)
+            lexer_emit_token(lx, token.token_kind_error(), start)
+            return
+        }
+    }
+    const string text ← cursor.cursor_slice(lx.cursor, start + 2, cursor.cursor_pos(lx.cursor))
+    const string clean ← clean_numeric_text(text)
+    const int ∪ null n ← parse_radix_uint(clean, radix)
+    if n not is null {
+        const int n2 ← n
+        lexer_emit_token(lx, token.token_kind_integer(n2), start)
+    }
+    else {
+        lexer_emit_issue_error(lx, LexErrorKind.InvalidNumber, start, issue)
+        lexer_emit_token(lx, token.token_kind_error(), start)
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Identifier and keyword scanner.
+# ---------------------------------------------------------------------------
+
+# Scan a Unicode identifier and apply the active keyword policy.
+# Identifier boundaries are ASCII XID rules plus `_` (L3). The resulting
+# text is either resolved through the keyword registry or interned as
+# normalized identifier payload.
+fn scan_identifier(Lexer lexer, int start) → vacuum {
+    var Lexer lx ← lexer
+    cursor.cursor_eat_while_in(lx.cursor, IDENT_CONTINUE_CHARS)
+    const string text ← cursor.cursor_slice(lx.cursor, start, cursor.cursor_pos(lx.cursor))
+    const token.TokenKind kind ← keyword_or_ident(lx, text)
+    lexer_emit_token(lx, kind, start)
+}
+
+# Resolve keyword spellings, or intern identifier text.
+# Keyword tokens are never emitted: every keyword lexes as an identifier
+# with its latin identity recorded in `reader_keyword_latin_keys`, and the
+# parser claims keywords by identity through the registry.
+fn keyword_or_ident(Lexer lexer, string text) → token.TokenKind {
+    var Lexer lx ← lexer
+    if text ≡ "_" {
+        const token.Symbol sym ← interner.interner_intern_normalized(lx.interner, text)
+        return token.token_kind_underscore(sym)
+    }
+    const token.TokenKind ∪ null k ← keywords.keyword_token_kind(text)
+    if k not is null {
+        lx.reader_keyword_latin_keys.pone(text, text)
+    }
+    const token.Symbol sym ← interner.interner_intern_normalized(lx.interner, text)
+    return token.token_kind_ident(sym)
+}
+
+# ---------------------------------------------------------------------------
+# Unexpected-character diagnostics.
+# ---------------------------------------------------------------------------
+
+# Display form for an offending character: `U+XXXX` for control and bidi
+# control codepoints, otherwise the quoted character (radix `escape_default`
+# — the ASCII approximation covers the Latin corpus).
+fn diagnostic_char(string c) → string {
+    const int cp ← c[0]
+    if is_control_codepoint(cp) or is_bidi_control(cp) {
+        return "U+§"(hex4(cp))
+    }
+    return "'§'"(c)
+}
+
+# ASCII control range (radix `char::is_control` — approximation).
+fn is_control_codepoint(int cp) → bool {
+    return (cp ≥ 0 and cp ≤ 31) or cp ≡ 127
+}
+
+# Unicode bidirectional control ranges, ported as fixed int checks.
+fn is_bidi_control(int cp) → bool {
+    return cp ≡ 0x061C
+        or cp ≡ 0x200E
+        or cp ≡ 0x200F
+        or (cp ≥ 0x202A and cp ≤ 0x202E)
+        or (cp ≥ 0x2066 and cp ≤ 0x2069)
+}
+
+# Uppercase hexadecimal spelling of a codepoint, minimum four digits.
+fn hex4(int cp) → string {
+    var string out ← ""
+    var int n ← cp
+    while n > 0 or out.longitudo() < 4 {
+        out ← "§§"(hex_digit(n % 16), out)
+        n ← n / 16
+    }
+    return out
+}

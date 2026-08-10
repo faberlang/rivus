@@ -1,0 +1,1317 @@
+# rivus/src/lexer/token.fab — token and symbol data contracts (port of
+# radix-lexer/src/token.rs).
+#
+# Owns the Token and Symbol types plus the complete TokenKind vocabulary.
+# Scanner policy lives in scan.fab; keyword taxonomy and alias metadata live
+# in keywords.fab; this module keeps the transport representation explicit
+# and cheap to copy.
+#
+# INVARIANTS
+# - Spans are offsets into the original UTF-8 source, not offsets into
+#   normalized strings. For the Latin corpus scalar count == byte offset, so
+#   the scalar-based cursor positions double as byte spans (L3).
+# - Symbol values are indexes into the Interner from the same lexer run.
+# - Literal tokens carry parsed numeric values; source spelling is recovered
+#   through spans when diagnostics or formatters need it.
+#
+# en surface (L3): identifiers port 1:1 from radix. Rust enums → unions,
+# structs → classes, tuples → payload fields. `Integer`/`Float` payloads are
+# `int`/`float` (the en surface names for numerus/fractus — the goal doc's
+# "num" is not an en-surface type).
+#
+# Variant discrimination lives here (same module): the faber checker rejects
+# match arms over imported union variants (SEM001, defect-sprint row 1), so
+# consumers call the predicate functions below instead of matching
+# token.TokenKind directly. Payload-variant construction also stays here
+# (PARSE030 rejects qualified `variant pkg.Name { ... }` construction).
+
+import from "§src/diagnostics/span" private span
+
+# ---------------------------------------------------------------------------
+# Symbol — interned string handle local to one lexer run.
+# ---------------------------------------------------------------------------
+
+# Interned string handle. Symbols are cheap to compare but not globally
+# meaningful: resolve them only with the Interner that produced the token
+# stream containing the symbol.
+class Symbol {
+    int id
+}
+
+# Create a symbol handle for an interner string-table index.
+fn symbol_new(int id) → Symbol {
+    return Symbol { id = id }
+}
+
+# ---------------------------------------------------------------------------
+# Token — one lexical item paired with its original source location.
+# ---------------------------------------------------------------------------
+
+# Tokens never borrow source text directly. Payload text moves through
+# Symbol handles; exact spelling remains available through the span and the
+# original source buffer.
+class Token {
+    TokenKind kind
+    span.Span span
+}
+
+# Classify a token payload and the source offset range it consumed.
+fn token_new(TokenKind kind, span.Span span) → Token {
+    return Token { kind = kind, span = span }
+}
+
+# ---------------------------------------------------------------------------
+# TokenKind — complete token vocabulary visible to the parser.
+# ---------------------------------------------------------------------------
+
+# This union is deliberately broad: it includes current source tokens,
+# metadata tokens, error/recovery sentinels, and a small number of reserved
+# internal variants. Spelling policy lives in scanner/keyword tables; this
+# type is the parser-facing vocabulary.
+union TokenKind {
+
+    Ident { Symbol sym },
+    Underscore { Symbol sym },
+    Integer { int value },
+    Float { float value },
+    String { Symbol sym },
+    AsciiString { Symbol sym },
+    BacktickString { Symbol sym },
+    OctetiString { Symbol sym },
+
+
+    Discretio,
+    Fixum,
+    Functio,
+    Genus,
+    Iuncta,
+    Implendum,
+    Importa,
+    Magnitudo,
+    Modulus,
+    Ordo,
+    Proba,
+    Probandum,
+    Sit,
+    Typus,
+    Varia,
+
+    Abstractus,
+    Ceteri,
+    Curata,
+    Errata,
+    Exitus,
+    Generis,
+    Iacit,
+    Immutata,
+    Nexum,
+    Optiones,
+    Prae,
+    Privata,
+    Protecta,
+    Publica,
+
+    Casu,
+    Ceterum,
+    Custodi,
+    Discerne,
+    Dum,
+    Elige,
+    Ergo,
+    Fac,
+    Itera,
+    Secus,
+    Si,
+    Sic,
+    Sin,
+
+    Perge,
+    Redde,
+    Rumpe,
+    Tacet,
+
+    Adfirma,
+    Cape,
+    Iace,
+    Mori,
+
+    Cede,
+    Clausura,
+    Cursor,
+    Futura,
+    Fiet,
+    Fiunt,
+    Fient,
+    Figendum,
+    Variandum,
+    Reddet,
+    Tacebit,
+
+    Brevis,
+    Cli,
+    Descriptio,
+    Fragment,
+    Imperium,
+    Longum,
+    Machina,
+    Nomen,
+    Nondum,
+    Nucleum,
+    Operandus,
+    Optio,
+    Radix,
+    Ubique,
+    Vertex,
+
+    Falsum,
+    Nihil,
+    Verum,
+
+    Aut,
+    Est,
+    Et,
+    Non,
+    Vel,
+
+    Ego,
+    Finge,
+    Implet,
+    Sub,
+
+    Conversio,
+    Verte,
+
+    Mone,
+    Nota,
+    Scribe,
+    Vide,
+
+    Ad,
+    Argumenta,
+    Cura,
+    Incipiet,
+    Incipit,
+    Meus,
+    Tuus,
+
+    De,
+    Ex,
+    In,
+    Lege,
+    Lineam,
+    Omnia,
+    Praefixum,
+    Scriptum,
+    Sparge,
+    Ut,
+
+    Ab,
+    Ante,
+    Inter,
+    Intra,
+    Per,
+    Usque,
+
+    Fragilis,
+    Futurum,
+    Metior,
+    Omitte,
+    Postpara,
+    Postparabit,
+    Praepara,
+    Praeparabit,
+    Repete,
+    Requirit,
+    Solum,
+    SolumIn,
+    Tag,
+    Temporis,
+
+    Negativum,
+    Nonnihil,
+    Nonnulla,
+    Nulla,
+    Positivum,
+
+    Sponte,
+
+
+    LParen,
+    RParen,
+    LBrace,
+    RBrace,
+    LBracket,
+    RBracket,
+    Comma,
+    Colon,
+    Semicolon,
+    Dot,
+    Arrow,
+    ExitArrow,
+    Cup,
+    At,
+
+
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseNot,
+    BitwiseShl,
+    BitwiseShr,
+    Bang,
+    Question,
+
+
+    Eq,
+    Assign,
+    ConversioAssign,
+    EqEq,
+    EqEqEq,
+    ApproxEq,
+    ApproxNotEq,
+    BangEq,
+    BangEqEq,
+    Lt,
+    Gt,
+    LtAscii,
+    GtAscii,
+    LtEq,
+    GtEq,
+
+
+    PostInc,
+    PostDec,
+
+
+    QuestionDot,
+    QuestionBracket,
+    QuestionParen,
+    BangDot,
+    BangBracket,
+    BangParen,
+
+
+    DotDot,
+    Ellipsis,
+
+
+    Therefore,
+
+
+    LineComment { Symbol sym },
+    Newline,
+
+
+    Eof,
+    Error
+}
+
+# ---------------------------------------------------------------------------
+# Payload-variant constructors (same-module construction — PARSE030 rejects
+# qualified variant construction through an import alias).
+# ---------------------------------------------------------------------------
+
+fn token_kind_ident(Symbol sym) → TokenKind {
+    return variant Ident { sym = sym } ∷ TokenKind
+}
+
+fn token_kind_underscore(Symbol sym) → TokenKind {
+    return variant Underscore { sym = sym } ∷ TokenKind
+}
+
+fn token_kind_integer(int value) → TokenKind {
+    return variant Integer { value = value } ∷ TokenKind
+}
+
+fn token_kind_float(float value) → TokenKind {
+    return variant Float { value = value } ∷ TokenKind
+}
+
+fn token_kind_string(Symbol sym) → TokenKind {
+    return variant String { sym = sym } ∷ TokenKind
+}
+
+fn token_kind_ascii_string(Symbol sym) → TokenKind {
+    return variant AsciiString { sym = sym } ∷ TokenKind
+}
+
+fn token_kind_backtick_string(Symbol sym) → TokenKind {
+    return variant BacktickString { sym = sym } ∷ TokenKind
+}
+
+fn token_kind_octeti_string(Symbol sym) → TokenKind {
+    return variant OctetiString { sym = sym } ∷ TokenKind
+}
+
+fn token_kind_line_comment(Symbol sym) → TokenKind {
+    return variant LineComment { sym = sym } ∷ TokenKind
+}
+
+
+
+# ---------------------------------------------------------------------------
+# Unit-variant constructors.
+# WHY: cross-module references to imported union variants do not typecheck
+# in live code in the current faber toolchain (the checker resolves the
+# member path but cannot unify it with the union type — SEM010). Same-module
+# construction works, so every unit variant gets a constructor here and
+# consumers (scan.fab, keywords.fab) build token kinds by calling across the
+# module boundary instead of referencing variants.
+
+fn token_kind_discretio() → TokenKind {
+    return TokenKind.Discretio
+}
+
+fn token_kind_fixum() → TokenKind {
+    return TokenKind.Fixum
+}
+
+fn token_kind_functio() → TokenKind {
+    return TokenKind.Functio
+}
+
+fn token_kind_genus() → TokenKind {
+    return TokenKind.Genus
+}
+
+fn token_kind_iuncta() → TokenKind {
+    return TokenKind.Iuncta
+}
+
+fn token_kind_implendum() → TokenKind {
+    return TokenKind.Implendum
+}
+
+fn token_kind_importa() → TokenKind {
+    return TokenKind.Importa
+}
+
+fn token_kind_magnitudo() → TokenKind {
+    return TokenKind.Magnitudo
+}
+
+fn token_kind_modulus() → TokenKind {
+    return TokenKind.Modulus
+}
+
+fn token_kind_ordo() → TokenKind {
+    return TokenKind.Ordo
+}
+
+fn token_kind_proba() → TokenKind {
+    return TokenKind.Proba
+}
+
+fn token_kind_probandum() → TokenKind {
+    return TokenKind.Probandum
+}
+
+fn token_kind_sit() → TokenKind {
+    return TokenKind.Sit
+}
+
+fn token_kind_typus() → TokenKind {
+    return TokenKind.Typus
+}
+
+fn token_kind_varia() → TokenKind {
+    return TokenKind.Varia
+}
+
+fn token_kind_abstractus() → TokenKind {
+    return TokenKind.Abstractus
+}
+
+fn token_kind_ceteri() → TokenKind {
+    return TokenKind.Ceteri
+}
+
+fn token_kind_curata() → TokenKind {
+    return TokenKind.Curata
+}
+
+fn token_kind_errata() → TokenKind {
+    return TokenKind.Errata
+}
+
+fn token_kind_exitus() → TokenKind {
+    return TokenKind.Exitus
+}
+
+fn token_kind_generis() → TokenKind {
+    return TokenKind.Generis
+}
+
+fn token_kind_iacit() → TokenKind {
+    return TokenKind.Iacit
+}
+
+fn token_kind_immutata() → TokenKind {
+    return TokenKind.Immutata
+}
+
+fn token_kind_nexum() → TokenKind {
+    return TokenKind.Nexum
+}
+
+fn token_kind_optiones() → TokenKind {
+    return TokenKind.Optiones
+}
+
+fn token_kind_prae() → TokenKind {
+    return TokenKind.Prae
+}
+
+fn token_kind_privata() → TokenKind {
+    return TokenKind.Privata
+}
+
+fn token_kind_protecta() → TokenKind {
+    return TokenKind.Protecta
+}
+
+fn token_kind_publica() → TokenKind {
+    return TokenKind.Publica
+}
+
+fn token_kind_casu() → TokenKind {
+    return TokenKind.Casu
+}
+
+fn token_kind_ceterum() → TokenKind {
+    return TokenKind.Ceterum
+}
+
+fn token_kind_custodi() → TokenKind {
+    return TokenKind.Custodi
+}
+
+fn token_kind_discerne() → TokenKind {
+    return TokenKind.Discerne
+}
+
+fn token_kind_dum() → TokenKind {
+    return TokenKind.Dum
+}
+
+fn token_kind_elige() → TokenKind {
+    return TokenKind.Elige
+}
+
+fn token_kind_ergo() → TokenKind {
+    return TokenKind.Ergo
+}
+
+fn token_kind_fac() → TokenKind {
+    return TokenKind.Fac
+}
+
+fn token_kind_itera() → TokenKind {
+    return TokenKind.Itera
+}
+
+fn token_kind_secus() → TokenKind {
+    return TokenKind.Secus
+}
+
+fn token_kind_si() → TokenKind {
+    return TokenKind.Si
+}
+
+fn token_kind_sic() → TokenKind {
+    return TokenKind.Sic
+}
+
+fn token_kind_sin() → TokenKind {
+    return TokenKind.Sin
+}
+
+fn token_kind_perge() → TokenKind {
+    return TokenKind.Perge
+}
+
+fn token_kind_redde() → TokenKind {
+    return TokenKind.Redde
+}
+
+fn token_kind_rumpe() → TokenKind {
+    return TokenKind.Rumpe
+}
+
+fn token_kind_tacet() → TokenKind {
+    return TokenKind.Tacet
+}
+
+fn token_kind_adfirma() → TokenKind {
+    return TokenKind.Adfirma
+}
+
+fn token_kind_cape() → TokenKind {
+    return TokenKind.Cape
+}
+
+fn token_kind_iace() → TokenKind {
+    return TokenKind.Iace
+}
+
+fn token_kind_mori() → TokenKind {
+    return TokenKind.Mori
+}
+
+fn token_kind_cede() → TokenKind {
+    return TokenKind.Cede
+}
+
+fn token_kind_clausura() → TokenKind {
+    return TokenKind.Clausura
+}
+
+fn token_kind_cursor() → TokenKind {
+    return TokenKind.Cursor
+}
+
+fn token_kind_futura() → TokenKind {
+    return TokenKind.Futura
+}
+
+fn token_kind_fiet() → TokenKind {
+    return TokenKind.Fiet
+}
+
+fn token_kind_fiunt() → TokenKind {
+    return TokenKind.Fiunt
+}
+
+fn token_kind_fient() → TokenKind {
+    return TokenKind.Fient
+}
+
+fn token_kind_figendum() → TokenKind {
+    return TokenKind.Figendum
+}
+
+fn token_kind_variandum() → TokenKind {
+    return TokenKind.Variandum
+}
+
+fn token_kind_reddet() → TokenKind {
+    return TokenKind.Reddet
+}
+
+fn token_kind_tacebit() → TokenKind {
+    return TokenKind.Tacebit
+}
+
+fn token_kind_brevis() → TokenKind {
+    return TokenKind.Brevis
+}
+
+fn token_kind_cli() → TokenKind {
+    return TokenKind.Cli
+}
+
+fn token_kind_descriptio() → TokenKind {
+    return TokenKind.Descriptio
+}
+
+fn token_kind_fragment() → TokenKind {
+    return TokenKind.Fragment
+}
+
+fn token_kind_imperium() → TokenKind {
+    return TokenKind.Imperium
+}
+
+fn token_kind_longum() → TokenKind {
+    return TokenKind.Longum
+}
+
+fn token_kind_machina() → TokenKind {
+    return TokenKind.Machina
+}
+
+fn token_kind_nomen() → TokenKind {
+    return TokenKind.Nomen
+}
+
+fn token_kind_nondum() → TokenKind {
+    return TokenKind.Nondum
+}
+
+fn token_kind_nucleum() → TokenKind {
+    return TokenKind.Nucleum
+}
+
+fn token_kind_operandus() → TokenKind {
+    return TokenKind.Operandus
+}
+
+fn token_kind_optio() → TokenKind {
+    return TokenKind.Optio
+}
+
+fn token_kind_radix() → TokenKind {
+    return TokenKind.Radix
+}
+
+fn token_kind_ubique() → TokenKind {
+    return TokenKind.Ubique
+}
+
+fn token_kind_vertex() → TokenKind {
+    return TokenKind.Vertex
+}
+
+fn token_kind_falsum() → TokenKind {
+    return TokenKind.Falsum
+}
+
+fn token_kind_nihil() → TokenKind {
+    return TokenKind.Nihil
+}
+
+fn token_kind_verum() → TokenKind {
+    return TokenKind.Verum
+}
+
+fn token_kind_aut() → TokenKind {
+    return TokenKind.Aut
+}
+
+fn token_kind_est() → TokenKind {
+    return TokenKind.Est
+}
+
+fn token_kind_et() → TokenKind {
+    return TokenKind.Et
+}
+
+fn token_kind_non() → TokenKind {
+    return TokenKind.Non
+}
+
+fn token_kind_vel() → TokenKind {
+    return TokenKind.Vel
+}
+
+fn token_kind_ego() → TokenKind {
+    return TokenKind.Ego
+}
+
+fn token_kind_finge() → TokenKind {
+    return TokenKind.Finge
+}
+
+fn token_kind_implet() → TokenKind {
+    return TokenKind.Implet
+}
+
+fn token_kind_sub() → TokenKind {
+    return TokenKind.Sub
+}
+
+fn token_kind_conversio() → TokenKind {
+    return TokenKind.Conversio
+}
+
+fn token_kind_verte() → TokenKind {
+    return TokenKind.Verte
+}
+
+fn token_kind_mone() → TokenKind {
+    return TokenKind.Mone
+}
+
+fn token_kind_nota() → TokenKind {
+    return TokenKind.Nota
+}
+
+fn token_kind_scribe() → TokenKind {
+    return TokenKind.Scribe
+}
+
+fn token_kind_vide() → TokenKind {
+    return TokenKind.Vide
+}
+
+fn token_kind_ad() → TokenKind {
+    return TokenKind.Ad
+}
+
+fn token_kind_argumenta() → TokenKind {
+    return TokenKind.Argumenta
+}
+
+fn token_kind_cura() → TokenKind {
+    return TokenKind.Cura
+}
+
+fn token_kind_incipiet() → TokenKind {
+    return TokenKind.Incipiet
+}
+
+fn token_kind_incipit() → TokenKind {
+    return TokenKind.Incipit
+}
+
+fn token_kind_meus() → TokenKind {
+    return TokenKind.Meus
+}
+
+fn token_kind_tuus() → TokenKind {
+    return TokenKind.Tuus
+}
+
+fn token_kind_de() → TokenKind {
+    return TokenKind.De
+}
+
+fn token_kind_ex() → TokenKind {
+    return TokenKind.Ex
+}
+
+fn token_kind_in() → TokenKind {
+    return TokenKind.In
+}
+
+fn token_kind_lege() → TokenKind {
+    return TokenKind.Lege
+}
+
+fn token_kind_lineam() → TokenKind {
+    return TokenKind.Lineam
+}
+
+fn token_kind_omnia() → TokenKind {
+    return TokenKind.Omnia
+}
+
+fn token_kind_praefixum() → TokenKind {
+    return TokenKind.Praefixum
+}
+
+fn token_kind_scriptum() → TokenKind {
+    return TokenKind.Scriptum
+}
+
+fn token_kind_sparge() → TokenKind {
+    return TokenKind.Sparge
+}
+
+fn token_kind_ut() → TokenKind {
+    return TokenKind.Ut
+}
+
+fn token_kind_ab() → TokenKind {
+    return TokenKind.Ab
+}
+
+fn token_kind_ante() → TokenKind {
+    return TokenKind.Ante
+}
+
+fn token_kind_inter() → TokenKind {
+    return TokenKind.Inter
+}
+
+fn token_kind_intra() → TokenKind {
+    return TokenKind.Intra
+}
+
+fn token_kind_per() → TokenKind {
+    return TokenKind.Per
+}
+
+fn token_kind_usque() → TokenKind {
+    return TokenKind.Usque
+}
+
+fn token_kind_fragilis() → TokenKind {
+    return TokenKind.Fragilis
+}
+
+fn token_kind_futurum() → TokenKind {
+    return TokenKind.Futurum
+}
+
+fn token_kind_metior() → TokenKind {
+    return TokenKind.Metior
+}
+
+fn token_kind_omitte() → TokenKind {
+    return TokenKind.Omitte
+}
+
+fn token_kind_postpara() → TokenKind {
+    return TokenKind.Postpara
+}
+
+fn token_kind_postparabit() → TokenKind {
+    return TokenKind.Postparabit
+}
+
+fn token_kind_praepara() → TokenKind {
+    return TokenKind.Praepara
+}
+
+fn token_kind_praeparabit() → TokenKind {
+    return TokenKind.Praeparabit
+}
+
+fn token_kind_repete() → TokenKind {
+    return TokenKind.Repete
+}
+
+fn token_kind_requirit() → TokenKind {
+    return TokenKind.Requirit
+}
+
+fn token_kind_solum() → TokenKind {
+    return TokenKind.Solum
+}
+
+fn token_kind_solumin() → TokenKind {
+    return TokenKind.SolumIn
+}
+
+fn token_kind_tag() → TokenKind {
+    return TokenKind.Tag
+}
+
+fn token_kind_temporis() → TokenKind {
+    return TokenKind.Temporis
+}
+
+fn token_kind_negativum() → TokenKind {
+    return TokenKind.Negativum
+}
+
+fn token_kind_nonnihil() → TokenKind {
+    return TokenKind.Nonnihil
+}
+
+fn token_kind_nonnulla() → TokenKind {
+    return TokenKind.Nonnulla
+}
+
+fn token_kind_nulla() → TokenKind {
+    return TokenKind.Nulla
+}
+
+fn token_kind_positivum() → TokenKind {
+    return TokenKind.Positivum
+}
+
+fn token_kind_sponte() → TokenKind {
+    return TokenKind.Sponte
+}
+
+fn token_kind_lparen() → TokenKind {
+    return TokenKind.LParen
+}
+
+fn token_kind_rparen() → TokenKind {
+    return TokenKind.RParen
+}
+
+fn token_kind_lbrace() → TokenKind {
+    return TokenKind.LBrace
+}
+
+fn token_kind_rbrace() → TokenKind {
+    return TokenKind.RBrace
+}
+
+fn token_kind_lbracket() → TokenKind {
+    return TokenKind.LBracket
+}
+
+fn token_kind_rbracket() → TokenKind {
+    return TokenKind.RBracket
+}
+
+fn token_kind_comma() → TokenKind {
+    return TokenKind.Comma
+}
+
+fn token_kind_colon() → TokenKind {
+    return TokenKind.Colon
+}
+
+fn token_kind_semicolon() → TokenKind {
+    return TokenKind.Semicolon
+}
+
+fn token_kind_dot() → TokenKind {
+    return TokenKind.Dot
+}
+
+fn token_kind_arrow() → TokenKind {
+    return TokenKind.Arrow
+}
+
+fn token_kind_exitarrow() → TokenKind {
+    return TokenKind.ExitArrow
+}
+
+fn token_kind_cup() → TokenKind {
+    return TokenKind.Cup
+}
+
+fn token_kind_at() → TokenKind {
+    return TokenKind.At
+}
+
+fn token_kind_plus() → TokenKind {
+    return TokenKind.Plus
+}
+
+fn token_kind_minus() → TokenKind {
+    return TokenKind.Minus
+}
+
+fn token_kind_star() → TokenKind {
+    return TokenKind.Star
+}
+
+fn token_kind_slash() → TokenKind {
+    return TokenKind.Slash
+}
+
+fn token_kind_percent() → TokenKind {
+    return TokenKind.Percent
+}
+
+fn token_kind_bitwiseand() → TokenKind {
+    return TokenKind.BitwiseAnd
+}
+
+fn token_kind_bitwiseor() → TokenKind {
+    return TokenKind.BitwiseOr
+}
+
+fn token_kind_bitwisexor() → TokenKind {
+    return TokenKind.BitwiseXor
+}
+
+fn token_kind_bitwisenot() → TokenKind {
+    return TokenKind.BitwiseNot
+}
+
+fn token_kind_bitwiseshl() → TokenKind {
+    return TokenKind.BitwiseShl
+}
+
+fn token_kind_bitwiseshr() → TokenKind {
+    return TokenKind.BitwiseShr
+}
+
+fn token_kind_bang() → TokenKind {
+    return TokenKind.Bang
+}
+
+fn token_kind_question() → TokenKind {
+    return TokenKind.Question
+}
+
+fn token_kind_eq() → TokenKind {
+    return TokenKind.Eq
+}
+
+fn token_kind_assign() → TokenKind {
+    return TokenKind.Assign
+}
+
+fn token_kind_conversioassign() → TokenKind {
+    return TokenKind.ConversioAssign
+}
+
+fn token_kind_eqeq() → TokenKind {
+    return TokenKind.EqEq
+}
+
+fn token_kind_eqeqeq() → TokenKind {
+    return TokenKind.EqEqEq
+}
+
+fn token_kind_approxeq() → TokenKind {
+    return TokenKind.ApproxEq
+}
+
+fn token_kind_approxnoteq() → TokenKind {
+    return TokenKind.ApproxNotEq
+}
+
+fn token_kind_bangeq() → TokenKind {
+    return TokenKind.BangEq
+}
+
+fn token_kind_bangeqeq() → TokenKind {
+    return TokenKind.BangEqEq
+}
+
+fn token_kind_lt() → TokenKind {
+    return TokenKind.Lt
+}
+
+fn token_kind_gt() → TokenKind {
+    return TokenKind.Gt
+}
+
+fn token_kind_ltascii() → TokenKind {
+    return TokenKind.LtAscii
+}
+
+fn token_kind_gtascii() → TokenKind {
+    return TokenKind.GtAscii
+}
+
+fn token_kind_lteq() → TokenKind {
+    return TokenKind.LtEq
+}
+
+fn token_kind_gteq() → TokenKind {
+    return TokenKind.GtEq
+}
+
+fn token_kind_postinc() → TokenKind {
+    return TokenKind.PostInc
+}
+
+fn token_kind_postdec() → TokenKind {
+    return TokenKind.PostDec
+}
+
+fn token_kind_questiondot() → TokenKind {
+    return TokenKind.QuestionDot
+}
+
+fn token_kind_questionbracket() → TokenKind {
+    return TokenKind.QuestionBracket
+}
+
+fn token_kind_questionparen() → TokenKind {
+    return TokenKind.QuestionParen
+}
+
+fn token_kind_bangdot() → TokenKind {
+    return TokenKind.BangDot
+}
+
+fn token_kind_bangbracket() → TokenKind {
+    return TokenKind.BangBracket
+}
+
+fn token_kind_bangparen() → TokenKind {
+    return TokenKind.BangParen
+}
+
+fn token_kind_dotdot() → TokenKind {
+    return TokenKind.DotDot
+}
+
+fn token_kind_ellipsis() → TokenKind {
+    return TokenKind.Ellipsis
+}
+
+fn token_kind_therefore() → TokenKind {
+    return TokenKind.Therefore
+}
+
+fn token_kind_newline() → TokenKind {
+    return TokenKind.Newline
+}
+
+fn token_kind_eof() → TokenKind {
+    return TokenKind.Eof
+}
+
+fn token_kind_error() → TokenKind {
+    return TokenKind.Error
+}
+# ---------------------------------------------------------------------------
+# Token-kind predicates — same-module discrimination for consumers.
+# ---------------------------------------------------------------------------
+
+# Whether this token kind is reserved-word syntax.
+# The parser and diagnostics use this to distinguish identifier-like payloads
+# from tokens that need keyword-specific messages or formatting. Keyword
+# identity is the registry's `token_kind` (keywords.fab); this match mirrors
+# radix token.rs `is_keyword` so consumers stay free of the registry.
+fn token_is_keyword(TokenKind kind) → bool {
+    match kind {
+        case TokenKind.Discretio { return true }
+        case TokenKind.Fixum { return true }
+        case TokenKind.Functio { return true }
+        case TokenKind.Genus { return true }
+        case TokenKind.Iuncta { return true }
+        case TokenKind.Implendum { return true }
+        case TokenKind.Importa { return true }
+        case TokenKind.Magnitudo { return true }
+        case TokenKind.Modulus { return true }
+        case TokenKind.Ordo { return true }
+        case TokenKind.Proba { return true }
+        case TokenKind.Probandum { return true }
+        case TokenKind.Sit { return true }
+        case TokenKind.Typus { return true }
+        case TokenKind.Varia { return true }
+        case TokenKind.Abstractus { return true }
+        case TokenKind.Ceteri { return true }
+        case TokenKind.Curata { return true }
+        case TokenKind.Errata { return true }
+        case TokenKind.Exitus { return true }
+        case TokenKind.Generis { return true }
+        case TokenKind.Iacit { return true }
+        case TokenKind.Immutata { return true }
+        case TokenKind.Nexum { return true }
+        case TokenKind.Optiones { return true }
+        case TokenKind.Prae { return true }
+        case TokenKind.Privata { return true }
+        case TokenKind.Protecta { return true }
+        case TokenKind.Publica { return true }
+        case TokenKind.Casu { return true }
+        case TokenKind.Ceterum { return true }
+        case TokenKind.Custodi { return true }
+        case TokenKind.Discerne { return true }
+        case TokenKind.Dum { return true }
+        case TokenKind.Elige { return true }
+        case TokenKind.Ergo { return true }
+        case TokenKind.Fac { return true }
+        case TokenKind.Itera { return true }
+        case TokenKind.Secus { return true }
+        case TokenKind.Si { return true }
+        case TokenKind.Sic { return true }
+        case TokenKind.Sin { return true }
+        case TokenKind.Perge { return true }
+        case TokenKind.Redde { return true }
+        case TokenKind.Rumpe { return true }
+        case TokenKind.Tacet { return true }
+        case TokenKind.Adfirma { return true }
+        case TokenKind.Cape { return true }
+        case TokenKind.Iace { return true }
+        case TokenKind.Mori { return true }
+        case TokenKind.Cede { return true }
+        case TokenKind.Clausura { return true }
+        case TokenKind.Cursor { return true }
+        case TokenKind.Futura { return true }
+        case TokenKind.Falsum { return true }
+        case TokenKind.Nihil { return true }
+        case TokenKind.Verum { return true }
+        case TokenKind.Aut { return true }
+        case TokenKind.Est { return true }
+        case TokenKind.Et { return true }
+        case TokenKind.Non { return true }
+        case TokenKind.Vel { return true }
+        case TokenKind.Ego { return true }
+        case TokenKind.Finge { return true }
+        case TokenKind.Implet { return true }
+        case TokenKind.Sub { return true }
+        case TokenKind.Conversio { return true }
+        case TokenKind.Verte { return true }
+        case TokenKind.Mone { return true }
+        case TokenKind.Nota { return true }
+        case TokenKind.Scribe { return true }
+        case TokenKind.Vide { return true }
+        case TokenKind.Ad { return true }
+        case TokenKind.Argumenta { return true }
+        case TokenKind.Cura { return true }
+        case TokenKind.Incipiet { return true }
+        case TokenKind.Incipit { return true }
+        case TokenKind.Meus { return true }
+        case TokenKind.Tuus { return true }
+        case TokenKind.De { return true }
+        case TokenKind.Ex { return true }
+        case TokenKind.In { return true }
+        case TokenKind.Lege { return true }
+        case TokenKind.Lineam { return true }
+        case TokenKind.Omnia { return true }
+        case TokenKind.Praefixum { return true }
+        case TokenKind.Scriptum { return true }
+        case TokenKind.Sparge { return true }
+        case TokenKind.Ut { return true }
+        case TokenKind.Ante { return true }
+        case TokenKind.Inter { return true }
+        case TokenKind.Intra { return true }
+        case TokenKind.Per { return true }
+        case TokenKind.Usque { return true }
+        case TokenKind.Fragilis { return true }
+        case TokenKind.Futurum { return true }
+        case TokenKind.Metior { return true }
+        case TokenKind.Omitte { return true }
+        case TokenKind.Postpara { return true }
+        case TokenKind.Postparabit { return true }
+        case TokenKind.Praepara { return true }
+        case TokenKind.Praeparabit { return true }
+        case TokenKind.Repete { return true }
+        case TokenKind.Requirit { return true }
+        case TokenKind.Solum { return true }
+        case TokenKind.SolumIn { return true }
+        case TokenKind.Tag { return true }
+        case TokenKind.Temporis { return true }
+        case TokenKind.Negativum { return true }
+        case TokenKind.Nonnihil { return true }
+        case TokenKind.Nonnulla { return true }
+        case TokenKind.Nulla { return true }
+        case TokenKind.Positivum { return true }
+        case TokenKind.Sponte { return true }
+        case TokenKind.Ab { return true }
+        case TokenKind.Fiet { return true }
+        case TokenKind.Fiunt { return true }
+        case TokenKind.Fient { return true }
+        case TokenKind.Figendum { return true }
+        case TokenKind.Variandum { return true }
+        case TokenKind.Reddet { return true }
+        case TokenKind.Tacebit { return true }
+        case TokenKind.Brevis { return true }
+        case TokenKind.Cli { return true }
+        case TokenKind.Descriptio { return true }
+        case TokenKind.Fragment { return true }
+        case TokenKind.Imperium { return true }
+        case TokenKind.Longum { return true }
+        case TokenKind.Machina { return true }
+        case TokenKind.Nomen { return true }
+        case TokenKind.Nondum { return true }
+        case TokenKind.Nucleum { return true }
+        case TokenKind.Operandus { return true }
+        case TokenKind.Optio { return true }
+        case TokenKind.Radix { return true }
+        case TokenKind.Ubique { return true }
+        case TokenKind.Vertex { return true }
+        case _ { return false }
+    }
+}
+
+# Whether this token carries source comment text.
+# Parsers may skip comments while tools such as formatters preserve them.
+fn token_is_comment(TokenKind kind) → bool {
+    match kind {
+        case TokenKind.LineComment const sym { return true }
+        case _ { return false }
+    }
+}
+
+# Whether this token is leading/trailing trivia skipped during infix parsing.
+fn token_is_trivia(TokenKind kind) → bool {
+    match kind {
+        case TokenKind.LineComment const sym { return true }
+        case TokenKind.Newline { return true }
+        case _ { return false }
+    }
+}
+
+# Whether this token sets the "code on current line" scanner flag.
+# radix scan.rs `token_counts_as_line_code`: everything except newlines and
+# line comments. Kept here because the faber checker cannot match imported
+# union variants (SEM001).
+fn token_is_line_code(TokenKind kind) → bool {
+    match kind {
+        case TokenKind.Newline { return false }
+        case TokenKind.LineComment const sym { return false }
+        case _ { return true }
+    }
+}

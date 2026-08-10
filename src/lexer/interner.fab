@@ -1,0 +1,90 @@
+# rivus/src/lexer/interner.fab — string interner for lexer-produced symbols
+# (port of the Interner section of radix-lexer/src/scan.rs).
+#
+# The interner is part of the lexer contract, not a global table. Symbol ids
+# are stable only inside one LexResult.
+#
+# Two intern paths exist (PRP-013):
+# - `interner_intern` — NFKC-normalizes for identifier / keyword-lookup
+#   identity so visually equivalent spellings share a symbol. NFKC is
+#   identity on the ASCII identifier surface (L3 decision: unicode-
+#   normalization has no Faber equivalent), so the raw text is stored.
+# - `interner_intern_raw` — stores literal and comment payloads as source
+#   text with no normalization, so string values and comment text are not
+#   silently rewritten.
+#
+# Determinism: the lookup map is an ordered `map<string, Symbol>` (the en
+# surface name for tabula) — no hash randomization, symbols are assigned in
+# first-seen order.
+#
+# en surface (L3): class instances are shared references (stepper
+# `Rc<RefCell<_>>`), so the mutation helpers update the caller's interner in
+# place; no copy-threading is needed. Radix identifiers port 1:1.
+
+import from "§src/lexer/token" private token
+
+class Interner {
+    list<string> strings
+    map<string, token.Symbol> map
+}
+
+# Create an empty interner.
+fn interner_new() → Interner {
+    return Interner { strings = [], map = {} }
+}
+
+# Intern identifier text and return its symbol handle.
+# Use for identifiers and keyword-lookup keys only. The returned handle
+# resolves to the stored spelling; use token spans when diagnostics need the
+# original bytes. For string, ascii, backtick, octeti, and comment payloads,
+# call `interner_intern_raw` instead.
+fn interner_intern(Interner interner, string s) → token.Symbol {
+    return interner_intern_exact(interner, s)
+}
+
+# Intern text the caller has already normalized.
+# radix's `intern_normalized` exists so NFKC runs once per identifier token;
+# on the ASCII surface intern and intern_normalized are the same path.
+fn interner_intern_normalized(Interner interner, string s) → token.Symbol {
+    return interner_intern_exact(interner, s)
+}
+
+# Intern payload text without normalization.
+# Use for delimited literal contents and comment text so source text is
+# preserved in the resolved symbol.
+fn interner_intern_raw(Interner interner, string s) → token.Symbol {
+    return interner_intern_exact(interner, s)
+}
+
+# Intern one string, reusing the existing symbol when already present.
+fn interner_intern_exact(Interner interner, string key) → token.Symbol {
+    var Interner i ← interner
+    const token.Symbol ∪ null existing ← i.map.accipe(key)
+    if existing not is null {
+        const token.Symbol existing2 ← existing
+        return existing2
+    }
+    const token.Symbol sym ← token.symbol_new(i.strings.longitudo())
+    i.map.pone(key, sym)
+    i.strings.appende(key)
+    return sym
+}
+
+# Resolve a symbol back to its interned string content.
+# Identifier symbols resolve to the stored form; literal and comment symbols
+# resolve to the source payload as stored.
+fn interner_resolve(Interner interner, token.Symbol sym) → string {
+    const string ∪ null s ← interner.strings[sym.id]
+    if s not is null {
+        const string s2 ← s
+        return s2
+    }
+    return ""
+}
+
+# Return interned strings in symbol-id order.
+# This is the stepper's symbol surface (radix `to_string_table` is the
+# serialized wire contract — dropped; rivus loads no artifacts).
+fn interner_strings(Interner interner) → list<string> {
+    return interner.strings
+}

@@ -1,0 +1,553 @@
+# rivus/src/lexer/keywords.fab — keyword spelling registry for lexer and
+# language-tool policy (port of radix-lexer/src/keywords.rs).
+#
+# The registry is the single source of truth for keyword identity. Every
+# keyword resolves to a locale-independent identity token via
+# `lookup_keyword_spec`; the parser claims keywords by that identity in its
+# grammar slots.
+#
+# WHY THIS EXISTS
+# Keywords are locale items: a reader pack re-spells the same identity for
+# each language, and the lexer never emits keyword tokens — every keyword
+# lexes as an identifier with its latin key recorded, so the parser resolves
+# identity through this registry in any locale.
+#
+# INVARIANTS
+# - `token_kind` is the keyword's locale-independent identity token. It is
+#   never emitted by the lexer; the parser references keywords by identity.
+# - `scope` records where a keyword is claimed. `Global` does not exist —
+#   no keyword is reserved everywhere (the variant stays for API parity).
+# - `Alias` entries name their canonical spelling.
+# - Keyword groups declare source-surface completeness constraints for
+#   reader packs; missing one member of a group is a validation error.
+#
+# en surface (L3): identifiers port 1:1 from radix. Rust enums → unions,
+# structs → classes, `&'static [KeywordOwner]` → const lists. The
+# `OnceLock`/discriminant maps in radix are lookup optimizations — the
+# ~180-row registry is scanned linearly (goal-doc port note).
+#
+# Variant-name renames (module-flat union variants — radix has no such
+# constraint): KeywordCategory::Annotation/Literal/Operator/ControlFlow are
+# renamed CategoryAnnotation/CategoryLiteral/CategoryOperator/
+# CategoryControlFlow to avoid collisions with KeywordScope.Annotation and
+# KeywordOwner.Literal/Operator/ControlFlow.
+
+import from "§src/lexer/token" private token
+
+# ---------------------------------------------------------------------------
+# KeywordOwner — parser or tooling surface that owns a contextual spelling.
+# ---------------------------------------------------------------------------
+
+union KeywordOwner {
+    EntryModifier,
+    FunctionModifier,
+    GenusHeader,
+    GenusMember,
+    RestPattern,
+    SpreadExpression,
+    AnnotationName,
+    AnnotationModifier,
+    MemberIdentifier,
+    DeclarationName,
+    ParameterName,
+    ImportVisibility,
+    TypeParameter,
+    ParameterMode,
+    AliasMarker,
+    IterationMode,
+    PredicateOperator,
+    CallablePosture,
+    ControlOperation,
+    TypeName,
+    Constructor,
+    ScribeStatement,
+    BuiltinCall,
+    Literal,
+    Operator,
+    DeclarationIntroducer,
+    ControlFlow,
+    ExpressionIntroducer,
+    RangeOperator,
+    StatementIntroducer,
+    DeclarationMarker,
+    RouteExpression
+}
+
+# ---------------------------------------------------------------------------
+# KeywordCategory — taxonomy bucket used by diagnostics and tooling.
+# ---------------------------------------------------------------------------
+
+union KeywordCategory {
+    Declaration,
+    Modifier,
+    CategoryControlFlow,
+    Transfer,
+    ErrorHandling,
+    Async,
+    CategoryLiteral,
+    CategoryOperator,
+    Object,
+    TypeOperation,
+    Output,
+    EntryPoint,
+    Resource,
+    Endpoint,
+    Misc,
+    Range,
+    Testing,
+    Nullability,
+    CategoryAnnotation
+}
+
+# ---------------------------------------------------------------------------
+# KeywordScope — where a keyword spelling is valid or intended to be owned.
+# ---------------------------------------------------------------------------
+
+union KeywordScope {
+
+
+    Global,
+
+    Contextual { list<KeywordOwner> owners },
+
+    Annotation,
+
+    TestOwned,
+
+    Alias { string canonical }
+}
+
+# ---------------------------------------------------------------------------
+# KeywordSpec / KeywordGroupSpec — registry row and group declarations.
+# ---------------------------------------------------------------------------
+
+# Registry row for one known keyword or keyword-like spelling.
+class KeywordSpec {
+    string text
+    token.TokenKind ∪ null token_kind
+    KeywordScope scope
+    KeywordCategory category
+}
+
+# Keyword families that must be localized together in a complete reader pack.
+class KeywordGroupSpec {
+    string id
+    list<string> members
+}
+
+# Validation issue for the static keyword group declarations.
+union KeywordGroupValidationError {
+    EmptyGroup { string group },
+    UnknownMember { string group, string key }
+}
+
+# ---------------------------------------------------------------------------
+# Owner lists (radix `&[KeywordOwner]` consts — declared here so the registry
+# rows stay compact).
+# ---------------------------------------------------------------------------
+
+const list<KeywordOwner> GENUS_HEADER ← [KeywordOwner.GenusHeader]
+const list<KeywordOwner> GENUS_MEMBER ← [KeywordOwner.GenusMember]
+const list<KeywordOwner> IMPORT_VISIBILITY_ANNOTATION_OR_MEMBER ← [
+    KeywordOwner.ImportVisibility,
+    KeywordOwner.AnnotationName,
+    KeywordOwner.MemberIdentifier
+]
+const list<KeywordOwner> ENTRY_FUNCTION_OR_PARAM_OR_MEMBER ← [
+    KeywordOwner.EntryModifier,
+    KeywordOwner.FunctionModifier,
+    KeywordOwner.DeclarationName,
+    KeywordOwner.ParameterName,
+    KeywordOwner.MemberIdentifier
+]
+const list<KeywordOwner> ANNOTATION_NAME ← [KeywordOwner.AnnotationName]
+const list<KeywordOwner> TYPE_PARAMETER ← [KeywordOwner.TypeParameter]
+const list<KeywordOwner> GENERIC_PARAMETER ← [KeywordOwner.TypeParameter]
+const list<KeywordOwner> REST_PATTERN ← [
+    KeywordOwner.RestPattern,
+    KeywordOwner.AnnotationModifier
+]
+const list<KeywordOwner> FUNCTION_MODIFIER ← [KeywordOwner.FunctionModifier]
+const list<KeywordOwner> ENTRY_OR_FUNCTION_MODIFIER ← [
+    KeywordOwner.EntryModifier,
+    KeywordOwner.FunctionModifier
+]
+const list<KeywordOwner> PARAMETER_MODE ← [
+    KeywordOwner.ParameterMode,
+    KeywordOwner.IterationMode
+]
+const list<KeywordOwner> ALIAS_MARKER ← [KeywordOwner.AliasMarker]
+const list<KeywordOwner> ITERATION_MODE ← [KeywordOwner.IterationMode]
+const list<KeywordOwner> SPREAD_EXPRESSION ← [KeywordOwner.SpreadExpression]
+const list<KeywordOwner> PREDICATE_OPERATOR ← [KeywordOwner.PredicateOperator]
+const list<KeywordOwner> PREDICATE_OR_MEMBER ← [
+    KeywordOwner.PredicateOperator,
+    KeywordOwner.MemberIdentifier
+]
+const list<KeywordOwner> CALLABLE_POSTURE ← [KeywordOwner.CallablePosture]
+const list<KeywordOwner> CONTROL_OPERATION ← [KeywordOwner.ControlOperation]
+# Batch A type-name slots: `modulus` claims the type-name position; `iuncta`
+# claims both the type-name and the constructor-expression position.
+const list<KeywordOwner> TYPE_NAME ← [KeywordOwner.TypeName]
+const list<KeywordOwner> TYPE_NAME_OR_CONSTRUCTOR ← [
+    KeywordOwner.TypeName,
+    KeywordOwner.Constructor
+]
+# Batch B builtin slots: `nota`/`mone`/`vide` are claimed in the statement-
+# initial scribe slot; `lege`/`lineam`/`scriptum` in the expression-primary
+# builtin-call slot.
+const list<KeywordOwner> SCRIBE_STATEMENT ← [KeywordOwner.ScribeStatement]
+const list<KeywordOwner> BUILTIN_CALL ← [KeywordOwner.BuiltinCall]
+# Batch C literal slot: `verum`/`falsum`/`nihil` are claimed in expression
+# and pattern positions as literal values.
+const list<KeywordOwner> LITERAL ← [KeywordOwner.Literal]
+const list<KeywordOwner> OPERATOR ← [KeywordOwner.Operator]
+const list<KeywordOwner> DECLARATION_INTRODUCER ← [KeywordOwner.DeclarationIntroducer]
+const list<KeywordOwner> CONTROL_FLOW ← [KeywordOwner.ControlFlow]
+const list<KeywordOwner> EXPRESSION_INTRODUCER ← [KeywordOwner.ExpressionIntroducer]
+const list<KeywordOwner> RANGE_OPERATOR ← [KeywordOwner.RangeOperator]
+const list<KeywordOwner> STATEMENT_INTRODUCER ← [KeywordOwner.StatementIntroducer]
+const list<KeywordOwner> DECLARATION_MARKER ← [KeywordOwner.DeclarationMarker]
+const list<KeywordOwner> ROUTE_EXPRESSION ← [KeywordOwner.RouteExpression]
+const list<KeywordOwner> ANNOTATION_MODIFIER ← [KeywordOwner.AnnotationModifier]
+# WHY: test annotation spellings are valid after `@` and as import/decl names
+# (`privata solum`), but not as bare type or binding identifiers
+# (`fixum solum x`).
+const list<KeywordOwner> TEST_ANNOTATION_NAME ← [
+    KeywordOwner.AnnotationName,
+    KeywordOwner.DeclarationName,
+    KeywordOwner.ParameterName,
+    KeywordOwner.MemberIdentifier
+]
+
+# ---------------------------------------------------------------------------
+# Group member lists and group declarations.
+# ---------------------------------------------------------------------------
+
+const list<string> CONDITIONAL_GROUP ← ["si", "sin", "secus"]
+const list<string> CHOICE_GROUP ← ["elige", "casu", "ceterum"]
+const list<string> PATTERN_CHOICE_GROUP ← ["discerne", "casu", "ceterum"]
+const list<string> TRY_RECOVERY_GROUP ← ["cape"]
+const list<string> LOOP_GROUP ← ["dum", "fac", "itera", "perge", "rumpe"]
+
+# Complete keyword-group declarations for static Latin source-surface data.
+const list<KeywordGroupSpec> KEYWORD_GROUP_SPECS ← [
+    KeywordGroupSpec { id = "conditional", members = CONDITIONAL_GROUP },
+    KeywordGroupSpec { id = "choice", members = CHOICE_GROUP },
+    KeywordGroupSpec { id = "pattern_choice", members = PATTERN_CHOICE_GROUP },
+    KeywordGroupSpec { id = "try_recovery", members = TRY_RECOVERY_GROUP },
+    KeywordGroupSpec { id = "loop", members = LOOP_GROUP }
+]
+
+# ---------------------------------------------------------------------------
+# KEYWORD_SPECS — complete registry of current, contextual, alias, and
+# annotation spellings (135 rows, radix declaration order).
+# ---------------------------------------------------------------------------
+
+# Return the keyword spelling registry in deterministic declaration order.
+# WHY a function: qualified references to the imported TokenKind variants do
+# not type in const-initializer context (the faber checker rejects
+# cross-module variant values in const position), so the rows are built in a
+# plain fn body and returned fresh on each call. A module-level lazy
+# singleton is a future optimization (see residuals).
+#
+# Compact row constructors. Two entry points keep every call to at most one
+# inline variant construction plus one inline unit reference (the faber
+# checker rejects calls with multiple inline union-typed arguments — SEM010).
+fn kwspec_ctx(string text, token.TokenKind kind, list<KeywordOwner> owners, KeywordCategory category) → KeywordSpec {
+    return KeywordSpec {
+        text = text,
+        token_kind = kind,
+        scope = variant Contextual { owners = owners } ∷ KeywordScope,
+        category = category
+    }
+}
+
+# Row constructor for unit-scope rows (TestOwned / Annotation / Alias).
+fn kwspec_scope(string text, token.TokenKind kind, KeywordScope scope, KeywordCategory category) → KeywordSpec {
+    return KeywordSpec {
+        text = text,
+        token_kind = kind,
+        scope = scope,
+        category = category
+    }
+}
+
+# The tokenless `vacua` row: `token_kind` is null, so the non-nullable row
+# constructors cannot build it — the full record form is used instead.
+fn vacua_spec() → KeywordSpec {
+    return KeywordSpec {
+        text = "vacua",
+        token_kind = null,
+        scope = variant Contextual { owners = EXPRESSION_INTRODUCER } ∷ KeywordScope,
+        category = KeywordCategory.CategoryLiteral
+    }
+}
+
+fn keyword_specs() → list<KeywordSpec> {
+    var list<KeywordSpec> specs ← []
+    specs.appende(kwspec_ctx("discretio", token.token_kind_discretio(), DECLARATION_INTRODUCER, KeywordCategory.Declaration))
+    specs.appende(kwspec_ctx("fixum", token.token_kind_fixum(), DECLARATION_INTRODUCER, KeywordCategory.Declaration))
+    specs.appende(kwspec_ctx("functio", token.token_kind_functio(), DECLARATION_INTRODUCER, KeywordCategory.Declaration))
+    specs.appende(kwspec_ctx("genus", token.token_kind_genus(), DECLARATION_INTRODUCER, KeywordCategory.Declaration))
+    specs.appende(kwspec_ctx("iuncta", token.token_kind_iuncta(), TYPE_NAME_OR_CONSTRUCTOR, KeywordCategory.Declaration))
+    specs.appende(kwspec_ctx("implendum", token.token_kind_implendum(), DECLARATION_INTRODUCER, KeywordCategory.Declaration))
+    specs.appende(kwspec_ctx("importa", token.token_kind_importa(), DECLARATION_INTRODUCER, KeywordCategory.Declaration))
+    specs.appende(kwspec_ctx("modulus", token.token_kind_modulus(), TYPE_NAME, KeywordCategory.TypeOperation))
+    specs.appende(kwspec_ctx("ordo", token.token_kind_ordo(), DECLARATION_INTRODUCER, KeywordCategory.Declaration))
+    specs.appende(kwspec_ctx("sit", token.token_kind_sit(), DECLARATION_INTRODUCER, KeywordCategory.Declaration))
+    specs.appende(kwspec_ctx("typus", token.token_kind_typus(), DECLARATION_INTRODUCER, KeywordCategory.Declaration))
+    specs.appende(kwspec_ctx("varia", token.token_kind_varia(), DECLARATION_INTRODUCER, KeywordCategory.Declaration))
+    specs.appende(kwspec_ctx("abstractus", token.token_kind_abstractus(), GENUS_HEADER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("ceteri", token.token_kind_ceteri(), REST_PATTERN, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("curata", token.token_kind_curata(), FUNCTION_MODIFIER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("errata", token.token_kind_errata(), FUNCTION_MODIFIER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("exitus", token.token_kind_exitus(), ENTRY_OR_FUNCTION_MODIFIER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("generis", token.token_kind_generis(), GENUS_MEMBER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("iacit", token.token_kind_iacit(), FUNCTION_MODIFIER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("immutata", token.token_kind_immutata(), FUNCTION_MODIFIER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("magnitudo", token.token_kind_magnitudo(), GENERIC_PARAMETER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("nexum", token.token_kind_nexum(), GENUS_MEMBER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("optiones", token.token_kind_optiones(), FUNCTION_MODIFIER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("prae", token.token_kind_prae(), TYPE_PARAMETER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("privata", token.token_kind_privata(), IMPORT_VISIBILITY_ANNOTATION_OR_MEMBER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("protecta", token.token_kind_protecta(), ANNOTATION_NAME, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("publica", token.token_kind_publica(), IMPORT_VISIBILITY_ANNOTATION_OR_MEMBER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("sponte", token.token_kind_sponte(), DECLARATION_MARKER, KeywordCategory.Modifier))
+    specs.appende(kwspec_ctx("casu", token.token_kind_casu(), CONTROL_FLOW, KeywordCategory.CategoryControlFlow))
+    specs.appende(kwspec_ctx("ceterum", token.token_kind_ceterum(), CONTROL_FLOW, KeywordCategory.CategoryControlFlow))
+    specs.appende(kwspec_ctx("custodi", token.token_kind_custodi(), CONTROL_FLOW, KeywordCategory.CategoryControlFlow))
+    specs.appende(kwspec_ctx("discerne", token.token_kind_discerne(), CONTROL_FLOW, KeywordCategory.CategoryControlFlow))
+    specs.appende(kwspec_ctx("dum", token.token_kind_dum(), CONTROL_FLOW, KeywordCategory.CategoryControlFlow))
+    specs.appende(kwspec_ctx("elige", token.token_kind_elige(), CONTROL_FLOW, KeywordCategory.CategoryControlFlow))
+    specs.appende(kwspec_ctx("fac", token.token_kind_fac(), CONTROL_FLOW, KeywordCategory.CategoryControlFlow))
+    specs.appende(kwspec_ctx("ergo", token.token_kind_ergo(), CONTROL_FLOW, KeywordCategory.CategoryControlFlow))
+    specs.appende(kwspec_ctx("itera", token.token_kind_itera(), CONTROL_FLOW, KeywordCategory.CategoryControlFlow))
+    specs.appende(kwspec_ctx("secus", token.token_kind_secus(), CONTROL_FLOW, KeywordCategory.CategoryControlFlow))
+    specs.appende(kwspec_ctx("si", token.token_kind_si(), CONTROL_FLOW, KeywordCategory.CategoryControlFlow))
+    specs.appende(kwspec_ctx("sic", token.token_kind_sic(), CONTROL_FLOW, KeywordCategory.CategoryControlFlow))
+    specs.appende(kwspec_ctx("sin", token.token_kind_sin(), CONTROL_FLOW, KeywordCategory.CategoryControlFlow))
+    specs.appende(kwspec_ctx("perge", token.token_kind_perge(), CONTROL_FLOW, KeywordCategory.Transfer))
+    specs.appende(kwspec_ctx("redde", token.token_kind_redde(), CONTROL_FLOW, KeywordCategory.Transfer))
+    specs.appende(kwspec_ctx("rumpe", token.token_kind_rumpe(), CONTROL_FLOW, KeywordCategory.Transfer))
+    specs.appende(kwspec_ctx("tacet", token.token_kind_tacet(), STATEMENT_INTRODUCER, KeywordCategory.Transfer))
+    specs.appende(kwspec_ctx("adfirma", token.token_kind_adfirma(), CONTROL_FLOW, KeywordCategory.ErrorHandling))
+    specs.appende(kwspec_ctx("cape", token.token_kind_cape(), CONTROL_FLOW, KeywordCategory.ErrorHandling))
+    specs.appende(kwspec_ctx("iace", token.token_kind_iace(), CONTROL_FLOW, KeywordCategory.ErrorHandling))
+    specs.appende(kwspec_ctx("mori", token.token_kind_mori(), CONTROL_FLOW, KeywordCategory.ErrorHandling))
+    specs.appende(kwspec_ctx("cede", token.token_kind_cede(), CONTROL_FLOW, KeywordCategory.Async))
+    specs.appende(kwspec_ctx("clausura", token.token_kind_clausura(), EXPRESSION_INTRODUCER, KeywordCategory.Async))
+    specs.appende(kwspec_ctx("fiet", token.token_kind_fiet(), CALLABLE_POSTURE, KeywordCategory.Async))
+    specs.appende(kwspec_ctx("fiunt", token.token_kind_fiunt(), CALLABLE_POSTURE, KeywordCategory.Async))
+    specs.appende(kwspec_ctx("fient", token.token_kind_fient(), CALLABLE_POSTURE, KeywordCategory.Async))
+    specs.appende(kwspec_ctx("figendum", token.token_kind_figendum(), CONTROL_OPERATION, KeywordCategory.Async))
+    specs.appende(kwspec_ctx("variandum", token.token_kind_variandum(), CONTROL_OPERATION, KeywordCategory.Async))
+    specs.appende(kwspec_ctx("reddet", token.token_kind_reddet(), CONTROL_OPERATION, KeywordCategory.Async))
+    specs.appende(kwspec_ctx("tacebit", token.token_kind_tacebit(), CONTROL_OPERATION, KeywordCategory.Async))
+    specs.appende(kwspec_ctx("falsum", token.token_kind_falsum(), LITERAL, KeywordCategory.CategoryLiteral))
+    specs.appende(kwspec_ctx("nihil", token.token_kind_nihil(), LITERAL, KeywordCategory.CategoryLiteral))
+    specs.appende(kwspec_ctx("verum", token.token_kind_verum(), LITERAL, KeywordCategory.CategoryLiteral))
+    specs.appende(vacua_spec())
+    specs.appende(kwspec_ctx("aut", token.token_kind_aut(), OPERATOR, KeywordCategory.CategoryOperator))
+    specs.appende(kwspec_ctx("est", token.token_kind_est(), OPERATOR, KeywordCategory.CategoryOperator))
+    specs.appende(kwspec_ctx("et", token.token_kind_et(), OPERATOR, KeywordCategory.CategoryOperator))
+    specs.appende(kwspec_ctx("non", token.token_kind_non(), OPERATOR, KeywordCategory.CategoryOperator))
+    specs.appende(kwspec_ctx("vel", token.token_kind_vel(), OPERATOR, KeywordCategory.CategoryOperator))
+    specs.appende(kwspec_ctx("ego", token.token_kind_ego(), EXPRESSION_INTRODUCER, KeywordCategory.Object))
+    specs.appende(kwspec_ctx("finge", token.token_kind_finge(), EXPRESSION_INTRODUCER, KeywordCategory.Object))
+    specs.appende(kwspec_ctx("implet", token.token_kind_implet(), GENUS_HEADER, KeywordCategory.Object))
+    specs.appende(kwspec_ctx("sub", token.token_kind_sub(), GENUS_HEADER, KeywordCategory.Object))
+    specs.appende(kwspec_ctx("mone", token.token_kind_mone(), SCRIBE_STATEMENT, KeywordCategory.Output))
+    specs.appende(kwspec_ctx("nota", token.token_kind_nota(), SCRIBE_STATEMENT, KeywordCategory.Output))
+    specs.appende(kwspec_scope("scribe", token.token_kind_scribe(), variant Alias { canonical = "nota" } ∷ KeywordScope, KeywordCategory.Output))
+    specs.appende(kwspec_ctx("vide", token.token_kind_vide(), SCRIBE_STATEMENT, KeywordCategory.Output))
+    specs.appende(kwspec_ctx("argumenta", token.token_kind_argumenta(), ENTRY_FUNCTION_OR_PARAM_OR_MEMBER, KeywordCategory.EntryPoint))
+    specs.appende(kwspec_ctx("incipiet", token.token_kind_incipiet(), DECLARATION_INTRODUCER, KeywordCategory.EntryPoint))
+    specs.appende(kwspec_ctx("incipit", token.token_kind_incipit(), DECLARATION_INTRODUCER, KeywordCategory.EntryPoint))
+    specs.appende(kwspec_ctx("cura", token.token_kind_cura(), STATEMENT_INTRODUCER, KeywordCategory.Resource))
+    specs.appende(kwspec_ctx("ad", token.token_kind_ad(), ROUTE_EXPRESSION, KeywordCategory.Endpoint))
+    specs.appende(kwspec_ctx("ab", token.token_kind_ab(), ITERATION_MODE, KeywordCategory.Misc))
+    specs.appende(kwspec_ctx("de", token.token_kind_de(), PARAMETER_MODE, KeywordCategory.Misc))
+    specs.appende(kwspec_ctx("ex", token.token_kind_ex(), DECLARATION_INTRODUCER, KeywordCategory.Misc))
+    specs.appende(kwspec_ctx("in", token.token_kind_in(), PARAMETER_MODE, KeywordCategory.Misc))
+    specs.appende(kwspec_ctx("lege", token.token_kind_lege(), BUILTIN_CALL, KeywordCategory.Misc))
+    specs.appende(kwspec_ctx("lineam", token.token_kind_lineam(), BUILTIN_CALL, KeywordCategory.Misc))
+    specs.appende(kwspec_ctx("omnia", token.token_kind_omnia(), DECLARATION_MARKER, KeywordCategory.Misc))
+    specs.appende(kwspec_ctx("praefixum", token.token_kind_praefixum(), EXPRESSION_INTRODUCER, KeywordCategory.Misc))
+    specs.appende(kwspec_ctx("scriptum", token.token_kind_scriptum(), BUILTIN_CALL, KeywordCategory.Misc))
+    specs.appende(kwspec_ctx("sparge", token.token_kind_sparge(), SPREAD_EXPRESSION, KeywordCategory.Misc))
+    specs.appende(kwspec_ctx("ut", token.token_kind_ut(), ALIAS_MARKER, KeywordCategory.Misc))
+    specs.appende(kwspec_ctx("ante", token.token_kind_ante(), RANGE_OPERATOR, KeywordCategory.Range))
+    specs.appende(kwspec_ctx("inter", token.token_kind_inter(), RANGE_OPERATOR, KeywordCategory.Range))
+    specs.appende(kwspec_ctx("intra", token.token_kind_intra(), RANGE_OPERATOR, KeywordCategory.Range))
+    specs.appende(kwspec_ctx("per", token.token_kind_per(), RANGE_OPERATOR, KeywordCategory.Range))
+    specs.appende(kwspec_ctx("usque", token.token_kind_usque(), RANGE_OPERATOR, KeywordCategory.Range))
+    specs.appende(kwspec_scope("fragilis", token.token_kind_fragilis(), KeywordScope.TestOwned, KeywordCategory.Testing))
+    specs.appende(kwspec_scope("futurum", token.token_kind_futurum(), KeywordScope.TestOwned, KeywordCategory.Testing))
+    specs.appende(kwspec_ctx("metior", token.token_kind_metior(), TEST_ANNOTATION_NAME, KeywordCategory.Testing))
+    specs.appende(kwspec_ctx("omitte", token.token_kind_omitte(), TEST_ANNOTATION_NAME, KeywordCategory.Testing))
+    specs.appende(kwspec_scope("postpara", token.token_kind_postpara(), KeywordScope.TestOwned, KeywordCategory.Testing))
+    specs.appende(kwspec_scope("postparabit", token.token_kind_postparabit(), KeywordScope.TestOwned, KeywordCategory.Testing))
+    specs.appende(kwspec_scope("praepara", token.token_kind_praepara(), KeywordScope.TestOwned, KeywordCategory.Testing))
+    specs.appende(kwspec_scope("praeparabit", token.token_kind_praeparabit(), KeywordScope.TestOwned, KeywordCategory.Testing))
+    specs.appende(kwspec_scope("proba", token.token_kind_proba(), KeywordScope.TestOwned, KeywordCategory.Testing))
+    specs.appende(kwspec_scope("probandum", token.token_kind_probandum(), KeywordScope.TestOwned, KeywordCategory.Testing))
+    specs.appende(kwspec_scope("repete", token.token_kind_repete(), KeywordScope.TestOwned, KeywordCategory.Testing))
+    specs.appende(kwspec_scope("requirit", token.token_kind_requirit(), KeywordScope.TestOwned, KeywordCategory.Testing))
+    specs.appende(kwspec_ctx("solum", token.token_kind_solum(), TEST_ANNOTATION_NAME, KeywordCategory.Testing))
+    specs.appende(kwspec_scope("solum_in", token.token_kind_solumin(), KeywordScope.TestOwned, KeywordCategory.Testing))
+    specs.appende(kwspec_ctx("tag", token.token_kind_tag(), TEST_ANNOTATION_NAME, KeywordCategory.Testing))
+    specs.appende(kwspec_scope("temporis", token.token_kind_temporis(), KeywordScope.TestOwned, KeywordCategory.Testing))
+    specs.appende(kwspec_ctx("negativum", token.token_kind_negativum(), PREDICATE_OPERATOR, KeywordCategory.Nullability))
+    specs.appende(kwspec_ctx("nonnihil", token.token_kind_nonnihil(), PREDICATE_OR_MEMBER, KeywordCategory.Nullability))
+    specs.appende(kwspec_ctx("nonnulla", token.token_kind_nonnulla(), PREDICATE_OPERATOR, KeywordCategory.Nullability))
+    specs.appende(kwspec_ctx("nulla", token.token_kind_nulla(), PREDICATE_OPERATOR, KeywordCategory.Nullability))
+    specs.appende(kwspec_ctx("positivum", token.token_kind_positivum(), PREDICATE_OPERATOR, KeywordCategory.Nullability))
+    specs.appende(kwspec_ctx("brevis", token.token_kind_brevis(), ANNOTATION_MODIFIER, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_scope("cli", token.token_kind_cli(), KeywordScope.Annotation, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_scope("cursor", token.token_kind_cursor(), KeywordScope.Annotation, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_ctx("descriptio", token.token_kind_descriptio(), ANNOTATION_MODIFIER, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_scope("futura", token.token_kind_futura(), KeywordScope.Annotation, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_scope("imperium", token.token_kind_imperium(), KeywordScope.Annotation, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_ctx("longum", token.token_kind_longum(), ANNOTATION_MODIFIER, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_scope("operandus", token.token_kind_operandus(), KeywordScope.Annotation, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_scope("optio", token.token_kind_optio(), KeywordScope.Annotation, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_ctx("ubique", token.token_kind_ubique(), ANNOTATION_MODIFIER, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_scope("nucleum", token.token_kind_nucleum(), KeywordScope.Annotation, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_scope("machina", token.token_kind_machina(), KeywordScope.Annotation, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_scope("vertex", token.token_kind_vertex(), KeywordScope.Annotation, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_scope("fragment", token.token_kind_fragment(), KeywordScope.Annotation, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_scope("nondum", token.token_kind_nondum(), KeywordScope.Annotation, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_scope("verte", token.token_kind_verte(), KeywordScope.Annotation, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_ctx("nomen", token.token_kind_nomen(), ANNOTATION_MODIFIER, KeywordCategory.CategoryAnnotation))
+    specs.appende(kwspec_scope("radix", token.token_kind_radix(), KeywordScope.Annotation, KeywordCategory.CategoryAnnotation))
+    return specs
+}
+
+# ---------------------------------------------------------------------------
+# Registry lookups.
+# ---------------------------------------------------------------------------
+
+# Return keyword group declarations in deterministic order.
+fn keyword_group_specs() → list<KeywordGroupSpec> {
+    return KEYWORD_GROUP_SPECS
+}
+
+# Look up registry metadata for an exact source spelling.
+fn lookup_keyword_spec(string text) → KeywordSpec ∪ null {
+    for from keyword_specs() const spec {
+        if spec.text ≡ text {
+            return spec
+        }
+    }
+    return null
+}
+
+# Return the live token kind for an exact normal-mode keyword spelling.
+# Metadata-only rows (tokenless) stay out of the scanner even though tools
+# may still explain them through the registry.
+fn keyword_token_kind(string text) → token.TokenKind ∪ null {
+    const KeywordSpec ∪ null spec ← lookup_keyword_spec(text)
+    if spec not is null {
+        const KeywordSpec spec2 ← spec
+        return spec2.token_kind
+    }
+    return null
+}
+
+# Return the canonical spelling for a keyword token kind, if any.
+fn keyword_spelling_for_token(token.TokenKind kind) → string ∪ null {
+    const KeywordSpec ∪ null spec ← keyword_spec_for_token(kind)
+    if spec not is null {
+        const KeywordSpec spec2 ← spec
+        return spec2.text
+    }
+    return null
+}
+
+# Whether this keyword row has an identity token.
+# Every registered keyword has one; the lexer never emits keyword tokens, so
+# this is identity presence, not lexer emission.
+fn keyword_spec_currently_lexes(KeywordSpec spec) → bool {
+    return spec.token_kind not is null
+}
+
+# Return whether `owner` may reinterpret a keyword token as an identifier.
+fn keyword_allowed_as_ident(KeywordOwner owner, token.TokenKind kind) → string ∪ null {
+    const KeywordSpec ∪ null spec ← keyword_spec_for_token(kind)
+    if spec not is null {
+        const KeywordSpec spec2 ← spec
+        if keyword_owner_allows_spec(owner, spec2) {
+            return spec2.text
+        }
+    }
+    return null
+}
+
+# Registry row whose identity token matches `kind`.
+fn keyword_spec_for_token(token.TokenKind kind) → KeywordSpec ∪ null {
+    for from keyword_specs() const spec {
+        const token.TokenKind ∪ null tk ← spec.token_kind
+        if tk not is null {
+            const token.TokenKind tk2 ← tk
+            if tk2 ≡ kind {
+                return spec
+            }
+        }
+    }
+    return null
+}
+
+# Whether a spec's scope accepts `owner` as an identifier-like position.
+fn keyword_owner_allows_spec(KeywordOwner owner, KeywordSpec spec) → bool {
+    match spec.scope {
+        case KeywordScope.Contextual const owners {
+            return owners.continet(owner)
+        }
+        case KeywordScope.TestOwned {
+            return keyword_owner_is_identifier_like(owner)
+        }
+        case KeywordScope.Alias const canonical {
+            return keyword_owner_is_identifier_like(owner)
+        }
+        case KeywordScope.Global {
+            if not keyword_owner_is_identifier_like(owner) {
+                return false
+            }
+            return GLOBAL_PARAMETER_OR_MEMBER.continet(spec.text)
+        }
+        case KeywordScope.Annotation {
+            return owner ≡ KeywordOwner.AnnotationName
+        }
+    }
+}
+
+# Whether the owner is a position that may carry identifier-like spellings.
+fn keyword_owner_is_identifier_like(KeywordOwner owner) → bool {
+    match owner {
+        case KeywordOwner.DeclarationName { return true }
+        case KeywordOwner.ParameterName { return true }
+        case KeywordOwner.MemberIdentifier { return true }
+        case _ { return false }
+    }
+}
+
+# Validate that static keyword groups reference live keyword rows.
+fn validate_keyword_groups() → list<KeywordGroupValidationError> {
+    var list<KeywordGroupValidationError> errors ← []
+    for from KEYWORD_GROUP_SPECS const group {
+        if group.members.longitudo() ≡ 0 {
+            errors.appende(variant EmptyGroup { group = group.id } ∷ KeywordGroupValidationError)
+            continue
+        }
+        for from group.members const member {
+            if lookup_keyword_spec(member) is null {
+                errors.appende(variant UnknownMember { group = group.id, key = member } ∷ KeywordGroupValidationError)
+            }
+        }
+    }
+    return errors
+}
+
+# Globally reserved spellings that may still name parameters or members.
+const list<string> GLOBAL_PARAMETER_OR_MEMBER ← ["cape", "inter", "scribe", "incipiet", "ex", "ad"]

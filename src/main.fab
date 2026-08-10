@@ -20,6 +20,11 @@
 
 import from "§src/diagnostics/diagnostic" private diagnostic
 import from "§src/diagnostics/span" private span
+import from "§src/lexer/token" private token
+import from "§src/lexer/cursor" private cursor
+import from "§src/lexer/interner" private interner
+import from "§src/lexer/keywords" private keywords
+import from "§src/lexer/scan" private scan
 
 main {
     print "rivus: skeleton — interpreter pipeline not yet implemented"
