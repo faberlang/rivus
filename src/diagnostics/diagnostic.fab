@@ -92,6 +92,39 @@ union LexErrorKind {
     InlineComment
 }
 
+# Variant constructors — same-module construction for cross-module
+# consumers. Imported union variants cannot be referenced or constructed
+# across modules in the current checker (tracked radix defect family
+# G1/G3/fix:sem001 — compiler-defect-sprint), so consumers build kinds
+# through these functions. They collapse when the defect lands.
+fn lex_error_kind_unterminated_string() → LexErrorKind {
+    return variant UnterminatedString {} ∷ LexErrorKind
+}
+
+fn lex_error_kind_invalid_number() → LexErrorKind {
+    return variant InvalidNumber {} ∷ LexErrorKind
+}
+
+fn lex_error_kind_invalid_escape() → LexErrorKind {
+    return variant InvalidEscape {} ∷ LexErrorKind
+}
+
+fn lex_error_kind_unexpected_character() → LexErrorKind {
+    return variant UnexpectedCharacter {} ∷ LexErrorKind
+}
+
+fn lex_error_kind_removed_section_directive() → LexErrorKind {
+    return variant RemovedSectionDirective {} ∷ LexErrorKind
+}
+
+fn lex_error_kind_invalid_comment_syntax() → LexErrorKind {
+    return variant InvalidCommentSyntax {} ∷ LexErrorKind
+}
+
+fn lex_error_kind_inline_comment() → LexErrorKind {
+    return variant InlineComment {} ∷ LexErrorKind
+}
+
 # ---------------------------------------------------------------------------
 # ParseErrorKind — parser diagnostic taxonomy, grouped by grammar area.
 # ---------------------------------------------------------------------------

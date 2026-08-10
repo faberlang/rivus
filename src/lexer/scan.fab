@@ -28,10 +28,10 @@
 # the en-surface `int`/`float` (i64/f64) — see the numeric parser notes.
 #
 # Variant references: token kinds and diagnostics kinds are built through
-# same-module constructors (token.token_kind_*, the local LexErrorKind)
+# same-module constructors (token.token_kind_*, diagnostic.lex_error_kind_*)
 # because cross-module references to imported union variants do not type in
-# live code in the current faber toolchain (SEM010 — see token.fab's
-# constructor section and the LexErrorKind mirror note below).
+# live code in the current faber toolchain (SEM010 — tracked radix defect
+# family G1/G3/fix:sem001; the constructors collapse when it lands).
 
 import from "§src/lexer/token" private token
 import from "§src/lexer/cursor" private cursor
@@ -69,34 +69,17 @@ const string IDENT_START_CHARS ← "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR
 const string IDENT_CONTINUE_CHARS ← "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
 
 # ---------------------------------------------------------------------------
-# LexErrorKind — lexical failure classes.
-# ---------------------------------------------------------------------------
-
-# Mirror of diagnostic.LexErrorKind (migrate-diagnostics). The faber checker
-# cannot type cross-module references to imported union variants in live code
-# (SEM010; same family as the SEM001 imported-union-match defect), and the
-# diagnostics module defines no constructors, so the lexer owns its copy and
-# the variant names match 1:1. RECOMMENDED FIX: add one constructor function
-# per variant to diagnostic.fab (lex_error_kind_*), then swap this union for
-# the imported one — a mechanical change with no caller edits.
-union LexErrorKind {
-    UnterminatedString,
-    InvalidNumber,
-    InvalidEscape,
-    UnexpectedCharacter,
-    RemovedSectionDirective,
-    InvalidCommentSyntax,
-    InlineComment
-}
-
-# ---------------------------------------------------------------------------
 # LexError — one lexical diagnostic with a source span and named facts.
 # ---------------------------------------------------------------------------
 
 # The lexer records errors at the point where tokenization policy is
 # violated; it does not format prose or decide parse recovery.
+# Kind is diagnostic.LexErrorKind, constructed via its lex_error_kind_*
+# constructors (imported union variants cannot be referenced or constructed
+# cross-module in the current checker — tracked radix defect family
+# G1/G3/fix:sem001; the constructors collapse when the defect lands).
 class LexError {
-    LexErrorKind kind
+    diagnostic.LexErrorKind kind
     span.Span span
     list<diagnostic.DiagnosticArg> args
 }
@@ -198,7 +181,7 @@ fn lexer_emit_token(Lexer lexer, token.TokenKind kind, int start) → vacuum {
 }
 
 # Record one lexical diagnostic spanning [start, cursor pos).
-fn lexer_emit_error(Lexer lexer, LexErrorKind kind, int start, list<diagnostic.DiagnosticArg> args) → vacuum {
+fn lexer_emit_error(Lexer lexer, diagnostic.LexErrorKind kind, int start, list<diagnostic.DiagnosticArg> args) → vacuum {
     var Lexer lx ← lexer
     lx.errors.appende(LexError {
         kind = kind,
@@ -208,7 +191,7 @@ fn lexer_emit_error(Lexer lexer, LexErrorKind kind, int start, list<diagnostic.D
 }
 
 # Record a lexical diagnostic carrying a single `issue` template fact.
-fn lexer_emit_issue_error(Lexer lexer, LexErrorKind kind, int start, string issue) → vacuum {
+fn lexer_emit_issue_error(Lexer lexer, diagnostic.LexErrorKind kind, int start, string issue) → vacuum {
     lexer_emit_error(lexer, kind, start, [issue_arg(issue)])
 }
 
@@ -586,7 +569,7 @@ fn scan_token(Lexer lexer) → vacuum {
         return
     }
     if c2 ≡ "§" {
-        lexer_emit_error(lx, LexErrorKind.RemovedSectionDirective, start, [issue_arg("removed_section_directive")])
+        lexer_emit_error(lx, diagnostic.lex_error_kind_removed_section_directive(), start, [issue_arg("removed_section_directive")])
         lexer_emit_token(lx, token.token_kind_error(), start)
         return
     }
@@ -632,7 +615,7 @@ fn scan_token(Lexer lexer) → vacuum {
         lexer_emit_token(lx, kind2, start)
         return
     }
-    lexer_emit_error(lx, LexErrorKind.UnexpectedCharacter, start, [issue_arg("unexpected_character"), char_arg(diagnostic_char(c2))])
+    lexer_emit_error(lx, diagnostic.lex_error_kind_unexpected_character(), start, [issue_arg("unexpected_character"), char_arg(diagnostic_char(c2))])
     lexer_emit_token(lx, token.token_kind_error(), start)
 }
 
@@ -799,7 +782,7 @@ fn scan_hash_comment(Lexer lexer, int start) → vacuum {
 fn reject_inline_hash_comment(Lexer lexer, int start) → vacuum {
     var Lexer lx ← lexer
     cursor.cursor_eat_while_not_in(lx.cursor, "\n\r")
-    lexer_emit_issue_error(lx, LexErrorKind.InlineComment, start, INLINE_COMMENT_ISSUE)
+    lexer_emit_issue_error(lx, diagnostic.lex_error_kind_inline_comment(), start, INLINE_COMMENT_ISSUE)
     lexer_emit_token(lx, token.token_kind_error(), start)
 }
 
@@ -838,7 +821,7 @@ fn scan_slash(Lexer lexer, int start) → vacuum {
         if nxt2 ≡ "/" {
             cursor.cursor_advance(lx.cursor)
             cursor.cursor_eat_while_not_in(lx.cursor, "\n\r")
-            lexer_emit_issue_error(lx, LexErrorKind.InvalidCommentSyntax, start, "c_style_line_comment")
+            lexer_emit_issue_error(lx, diagnostic.lex_error_kind_invalid_comment_syntax(), start, "c_style_line_comment")
             lexer_emit_token(lx, token.token_kind_error(), start)
             return
         }
@@ -868,7 +851,7 @@ fn scan_slash(Lexer lexer, int start) → vacuum {
             if terminated {
                 issue ← "c_style_block_comment"
             }
-            lexer_emit_issue_error(lx, LexErrorKind.InvalidCommentSyntax, start, issue)
+            lexer_emit_issue_error(lx, diagnostic.lex_error_kind_invalid_comment_syntax(), start, issue)
             lexer_emit_token(lx, token.token_kind_error(), start)
             return
         }
@@ -892,13 +875,13 @@ fn scan_string(Lexer lexer, int start) → vacuum {
     while not done {
         const string ∪ null c ← cursor.cursor_peek(lx.cursor)
         if c is null {
-            lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "unterminated_string_literal")
+            lexer_emit_issue_error(lx, diagnostic.lex_error_kind_unterminated_string(), start, "unterminated_string_literal")
             done ← true
         }
         else {
             const string c2 ← c
             if c2 ≡ "\n" or c2 ≡ "\r" {
-                lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "newline_in_string_literal")
+                lexer_emit_issue_error(lx, diagnostic.lex_error_kind_unterminated_string(), start, "newline_in_string_literal")
                 done ← true
             }
             elif c2 ≡ "\\" {
@@ -942,13 +925,13 @@ fn scan_ascii_string(Lexer lexer, int start) → vacuum {
     while not done {
         const string ∪ null c ← cursor.cursor_peek(lx.cursor)
         if c is null {
-            lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "unterminated_ascii_literal")
+            lexer_emit_issue_error(lx, diagnostic.lex_error_kind_unterminated_string(), start, "unterminated_ascii_literal")
             done ← true
         }
         else {
             const string c2 ← c
             if c2 ≡ "\n" or c2 ≡ "\r" {
-                lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "newline_in_ascii_literal")
+                lexer_emit_issue_error(lx, diagnostic.lex_error_kind_unterminated_string(), start, "newline_in_ascii_literal")
                 done ← true
             }
             elif c2 ≡ "\\" {
@@ -990,7 +973,7 @@ fn scan_backtick_string(Lexer lexer, int start) → vacuum {
     while not done {
         const string ∪ null c ← cursor.cursor_peek(lx.cursor)
         if c is null {
-            lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "unterminated_backtick_template_literal")
+            lexer_emit_issue_error(lx, diagnostic.lex_error_kind_unterminated_string(), start, "unterminated_backtick_template_literal")
             done ← true
         }
         else {
@@ -1026,7 +1009,7 @@ fn scan_octeti_string(Lexer lexer, int start) → vacuum {
     while not done {
         const string ∪ null c ← cursor.cursor_peek(lx.cursor)
         if c is null {
-            lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "unterminated_octeti_literal")
+            lexer_emit_issue_error(lx, diagnostic.lex_error_kind_unterminated_string(), start, "unterminated_octeti_literal")
             done ← true
         }
         else {
@@ -1060,7 +1043,7 @@ fn scan_guillemet_block_string(Lexer lexer, int start) → vacuum {
     while not done {
         const string ∪ null c ← cursor.cursor_peek(lx.cursor)
         if c is null {
-            lexer_emit_issue_error(lx, LexErrorKind.UnterminatedString, start, "unterminated_guillemet_block_string_literal")
+            lexer_emit_issue_error(lx, diagnostic.lex_error_kind_unterminated_string(), start, "unterminated_guillemet_block_string_literal")
             done ← true
         }
         else {
@@ -1180,19 +1163,19 @@ fn scan_number(Lexer lexer, int start, string first) → vacuum {
     if is_float or has_exp {
         const float ∪ null f ← parse_float(clean)
         if f is null {
-            lexer_emit_issue_error(lx, LexErrorKind.InvalidNumber, start, "invalid_floating_point_number")
+            lexer_emit_issue_error(lx, diagnostic.lex_error_kind_invalid_number(), start, "invalid_floating_point_number")
             lexer_emit_token(lx, token.token_kind_error(), start)
         }
         else {
             const float f2 ← f
             if f2 > FLOAT_MAX or f2 < FLOAT_MIN {
-                lexer_emit_issue_error(lx, LexErrorKind.InvalidNumber, start, "float_overflow")
+                lexer_emit_issue_error(lx, diagnostic.lex_error_kind_invalid_number(), start, "float_overflow")
                 lexer_emit_token(lx, token.token_kind_error(), start)
             }
             elif f2 ≡ 0.0 and has_non_zero_significand(clean) {
                 # F-057: underflow to 0.0 must produce a diagnostic when the
                 # significand is non-zero (true zero like 0e-400 is fine).
-                lexer_emit_issue_error(lx, LexErrorKind.InvalidNumber, start, "float_underflow")
+                lexer_emit_issue_error(lx, diagnostic.lex_error_kind_invalid_number(), start, "float_underflow")
                 lexer_emit_token(lx, token.token_kind_error(), start)
             }
             else {
@@ -1207,7 +1190,7 @@ fn scan_number(Lexer lexer, int start, string first) → vacuum {
             lexer_emit_token(lx, token.token_kind_integer(n2), start)
         }
         else {
-            lexer_emit_issue_error(lx, LexErrorKind.InvalidNumber, start, "invalid_integer")
+            lexer_emit_issue_error(lx, diagnostic.lex_error_kind_invalid_number(), start, "invalid_integer")
             lexer_emit_token(lx, token.token_kind_error(), start)
         }
     }
@@ -1227,7 +1210,7 @@ fn scan_radix_int(Lexer lexer, int start, int radix, string digit_set, string is
         const string c2 ← c
         if is_ascii_alphanumeric(c2) and not digit_set.continet(c2) {
             cursor.cursor_eat_while_in(lx.cursor, ASCII_ALNUM_UNDERSCORE_CHARS)
-            lexer_emit_issue_error(lx, LexErrorKind.InvalidNumber, start, issue)
+            lexer_emit_issue_error(lx, diagnostic.lex_error_kind_invalid_number(), start, issue)
             lexer_emit_token(lx, token.token_kind_error(), start)
             return
         }
@@ -1240,7 +1223,7 @@ fn scan_radix_int(Lexer lexer, int start, int radix, string digit_set, string is
         lexer_emit_token(lx, token.token_kind_integer(n2), start)
     }
     else {
-        lexer_emit_issue_error(lx, LexErrorKind.InvalidNumber, start, issue)
+        lexer_emit_issue_error(lx, diagnostic.lex_error_kind_invalid_number(), start, issue)
         lexer_emit_token(lx, token.token_kind_error(), start)
     }
 }
