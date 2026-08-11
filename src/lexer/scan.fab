@@ -1266,29 +1266,28 @@ fn keyword_or_ident(Lexer lexer, string text) → token.TokenKind {
 # Unexpected-character diagnostics.
 # ---------------------------------------------------------------------------
 
-# Display form for an offending character: `U+XXXX` for control and bidi
-# control codepoints, otherwise the quoted character (radix `escape_default`
-# — the ASCII approximation covers the Latin corpus).
+# Display form for an offending character: `U+XXXX` for control scalars,
+# otherwise the quoted character (radix `escape_default`).
+#
+# Closed semantics (ascii-char-index): `c[0]` yields the ascii char type,
+# not the numeric codepoint, so control detection compares the one-scalar
+# string against textus literals and the codepoint conversion (`↦ int`)
+# runs only inside the display branch — the one place an int is genuinely
+# required. `\n`/`\t`/`\r` are the only control scalars the literal surface
+# can spell; the rest of C0, DEL, and the non-ASCII bidi set belong to the
+# Unicode-parity follow-up.
 fn diagnostic_char(string c) → string {
-    const int cp ← c[0]
-    if is_control_codepoint(cp) or is_bidi_control(cp) {
-        return "U+§"(hex4(cp))
+    if is_control_char(c) {
+        const ascii ch ← c[0]
+        return "U+§"(hex4(ch ↦ int))
     }
     return "'§'"(c)
 }
 
-# ASCII control range (radix `char::is_control` — approximation).
-fn is_control_codepoint(int cp) → bool {
-    return (cp ≥ 0 and cp ≤ 31) or cp ≡ 127
-}
-
-# Unicode bidirectional control ranges, ported as fixed int checks.
-fn is_bidi_control(int cp) → bool {
-    return cp ≡ 0x061C
-        or cp ≡ 0x200E
-        or cp ≡ 0x200F
-        or (cp ≥ 0x202A and cp ≤ 0x202E)
-        or (cp ≥ 0x2066 and cp ≤ 0x2069)
+# ASCII control scalars spellable as textus literals (radix
+# `char::is_control` subset — see diagnostic_char for the limit).
+fn is_control_char(string c) → bool {
+    return c ≡ "\n" or c ≡ "\t" or c ≡ "\r"
 }
 
 # Uppercase hexadecimal spelling of a codepoint, minimum four digits.
