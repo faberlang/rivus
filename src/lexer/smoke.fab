@@ -21,7 +21,7 @@ test "interner_round_trip" {
     assert c.id ≡ a.id
     assert interner.interner_resolve(in, a) ≡ "alpha"
     # One unique string in the table.
-    assert interner.interner_strings(in).longitudo() ≡ 1
+    assert interner.interner_strings(in).length() ≡ 1
 }
 
 test "lex_trivial_program" {
@@ -32,5 +32,5 @@ test "lex_trivial_program" {
     # recorded for the parser (Ident, String, Newline, Eof — terminal Eof is
     # always present).
     assert result.reader_keyword_latin_keys.habet("nota")
-    assert result.tokens.longitudo() ≥ 4
+    assert result.tokens.length() ≥ 4
 }
