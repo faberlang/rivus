@@ -97,9 +97,10 @@ TypeTable). Do not skip typecheck to "make it faster."
 
 ## Validation discipline (workspace rules apply)
 
-- Narrow in-loop checks only: `faber check` on touched files, a single
-  touched module, or `./scripta/test --check` from `radix/` when the change
-  crosses the toolchain. Never hold the shared Cargo lock with full builds.
+- Narrow in-loop checks only: the packet-local Faber CLI on touched files, a
+  single touched module, or `./scripta/test --check` from the packet's sibling
+  `radix/` when the change crosses the toolchain. Each packet owns its Cargo
+  target; do not build from main checkouts.
 - One closeout run after the last product edit, then stop. Full runs are
   auditor-owned.
 - Tests strongly preferred for new behavior; red-green; smallest proof.
@@ -113,9 +114,9 @@ TypeTable). Do not skip typecheck to "make it faster."
 
 ## Archive
 
-The prior attempt is preserved at `rivus.to-be-deleted/` (forensics + the
-planning docs). It is non-authoritative for current syntax and structure —
-do not copy code from it. Lessons are extracted into `docs/CAMPAIGN.md`.
+The prior attempt is preserved in Git history, not as a live sibling directory.
+It is non-authoritative for current syntax and structure. Lessons are extracted
+into `docs/CAMPAIGN.md`; do not restore or copy the retired source.
 
 ## Structure map
 
