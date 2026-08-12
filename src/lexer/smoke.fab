@@ -31,6 +31,6 @@ test "lex_trivial_program" {
     # "nota" is a keyword: it lexes as an identifier with its latin key
     # recorded for the parser (Ident, String, Newline, Eof — terminal Eof is
     # always present).
-    assert result.reader_keyword_latin_keys.habet("nota")
+    assert result.reader_keyword_latin_keys.has("nota")
     assert result.tokens.length() ≥ 4
 }

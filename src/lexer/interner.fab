@@ -59,7 +59,7 @@ fn interner_intern_raw(Interner interner, string s) → token.Symbol {
 # Intern one string, reusing the existing symbol when already present.
 fn interner_intern_exact(Interner interner, string key) → token.Symbol {
     var Interner i ← interner
-    const token.Symbol ∪ null existing ← i.map.accipe(key)
+    const token.Symbol ∪ null existing ← i.map.get(key)
     if existing not is null {
         const token.Symbol existing2 ← existing
         return existing2
