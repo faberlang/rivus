@@ -64,9 +64,9 @@ fn interner_intern_exact(Interner interner, string key) → token.Symbol {
         const token.Symbol existing2 ← existing
         return existing2
     }
-    const token.Symbol sym ← token.symbol_new(i.strings.longitudo())
-    i.map.pone(key, sym)
-    i.strings.appende(key)
+    const token.Symbol sym ← token.symbol_new(i.strings.length())
+    i.map.put(key, sym)
+    i.strings.append(key)
     return sym
 }
 

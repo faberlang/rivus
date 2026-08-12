@@ -18,9 +18,9 @@ crates (structure to mirror), `radix-mir-stepper` (interpreter to mirror),
   names to English surfaces (`continet → contains`, `longitudo → length`,
   `sectio → slice`, `appende → append`, …), so en-locale source writes
   `.contains(c)` — e.g. `ASCII_ALNUM_CHARS.contains(c)` in
-  `is_ascii_alphanumeric`. Canonical Latin spellings (`.continet(c)`) still
-  resolve in any locale — lookup is surface-first and the canonical name is
-  the registry identity — and both spellings lower to the same intrinsic.
+  `is_ascii_alphanumeric`. Lookup is pack-first: only the en pack's surface
+  spellings resolve under this locale, and canonical Latin spellings
+  (`.continet(c)`) are a compile error, not a fallback.
 - **Module imports:** `§` template paths, source-root-relative —
   `import from "§src/lexer/token" private token` (faber.toml
   `[paths.templates] src = "src"`; coreutils pattern). Provider-qualified
@@ -56,7 +56,7 @@ correct. These rules match the upcoming faber `forma` auto-format behavior:
   multi-scan function should make its structure visible at a glance.
 - **Name magic numbers.** A bare numeric comparison gets a named constant
   with an explanation; the name is the documentation.
-- **Hoist repeated receiver calls.** `source.longitudo()` is read once into
+- **Hoist repeated receiver calls.** `source.length()` is read once into
   `const int len` and reused — one read, single source of truth, no repeated
   calls that could disagree if the receiver ever becomes mutable.
 
@@ -93,7 +93,7 @@ TypeTable). Do not skip typecheck to "make it faster."
 7. **en surface everywhere.** Radix identifiers port 1:1 — do not Latinize.
    Intrinsic method calls included: en source writes `.contains(c)`,
    `.length()`, `.slice()`, `.append()` (the pack's intrinsic surface), not
-   `.continet(c)` — though canonical spellings remain valid.
+   `.continet(c)` — pack-first lookup rejects canonical Latin spellings.
 
 ## Validation discipline (workspace rules apply)
 

@@ -43,9 +43,9 @@ fn cursor_pos(Cursor cursor) → int {
 
 # Peek at the next character without consuming it.
 fn cursor_peek(Cursor cursor) → string ∪ null {
-    const int len ← cursor.source.longitudo()
+    const int len ← cursor.source.length()
     if cursor.pos < len {
-        return cursor.source.sectio(cursor.pos, cursor.pos + 1)
+        return cursor.source.slice(cursor.pos, cursor.pos + 1)
     }
     return null
 }
@@ -55,9 +55,9 @@ fn cursor_peek(Cursor cursor) → string ∪ null {
 # grammar currently distinguishes only short compound tokens and decimal
 # float starts (`.` followed by a digit).
 fn cursor_peek_next(Cursor cursor) → string ∪ null {
-    const int len ← cursor.source.longitudo()
+    const int len ← cursor.source.length()
     if cursor.pos + 1 < len {
-        return cursor.source.sectio(cursor.pos + 1, cursor.pos + 2)
+        return cursor.source.slice(cursor.pos + 1, cursor.pos + 2)
     }
     return null
 }
@@ -99,7 +99,7 @@ fn cursor_eat_while_in(Cursor cursor, string accepted) → vacuum {
         }
         else {
             const string c2 ← c
-            if accepted.continet(c2) {
+            if accepted.contains(c2) {
                 cur.pos ← cur.pos + 1
             }
             else {
@@ -120,7 +120,7 @@ fn cursor_eat_while_not_in(Cursor cursor, string forbidden) → vacuum {
         }
         else {
             const string c2 ← c
-            if forbidden.continet(c2) {
+            if forbidden.contains(c2) {
                 keep ← false
             }
             else {
@@ -139,11 +139,11 @@ fn cursor_is_eof(Cursor cursor) → bool {
 # Callers must pass offsets produced by this cursor; the slice is unchecked,
 # matching the cheap hot-path extraction the token scanners need.
 fn cursor_slice(Cursor cursor, int start, int end) → string {
-    return cursor.source.sectio(start, end)
+    return cursor.source.slice(start, end)
 }
 
 # The unconsumed suffix of the source buffer.
 fn cursor_rest(Cursor cursor) → string {
-    const int len ← cursor.source.longitudo()
-    return cursor.source.sectio(cursor.pos, len)
+    const int len ← cursor.source.length()
+    return cursor.source.slice(cursor.pos, len)
 }

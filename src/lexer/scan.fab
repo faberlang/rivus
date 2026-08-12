@@ -101,7 +101,7 @@ class LexResult {
 
 # Whether lexing produced no diagnostics.
 fn lex_result_success(LexResult result) → bool {
-    return result.errors.longitudo() ≡ 0
+    return result.errors.length() ≡ 0
 }
 
 # ---------------------------------------------------------------------------
@@ -177,13 +177,13 @@ fn lexer_emit_token(Lexer lexer, token.TokenKind kind, int start) → vacuum {
     if token.token_is_line_code(kind) {
         lx.line_has_code ← true
     }
-    lx.tokens.appende(token.token_new(kind, span.span_new(start, cursor.cursor_pos(lx.cursor))))
+    lx.tokens.append(token.token_new(kind, span.span_new(start, cursor.cursor_pos(lx.cursor))))
 }
 
 # Record one lexical diagnostic spanning [start, cursor pos).
 fn lexer_emit_error(Lexer lexer, diagnostic.LexErrorKind kind, int start, list<diagnostic.DiagnosticArg> args) → vacuum {
     var Lexer lx ← lexer
-    lx.errors.appende(LexError {
+    lx.errors.append(LexError {
         kind = kind,
         span = span.span_new(start, cursor.cursor_pos(lx.cursor)),
         args = args
@@ -246,23 +246,23 @@ fn scan_line_break(Lexer lexer, int start, string c) → bool {
 # string — the checker rejects textus ordering comparisons, so range checks
 # would not compile (norma json/lexica pattern).
 fn is_ascii_digit(string c) → bool {
-    return "0123456789".continet(c)
+    return "0123456789".contains(c)
 }
 
 # Whether `c` is an ASCII alphanumeric.
 fn is_ascii_alphanumeric(string c) → bool {
-    return ASCII_ALNUM_CHARS.continet(c)
+    return ASCII_ALNUM_CHARS.contains(c)
 }
 
 # Whether `c` can start a Faber identifier (XID-start + `_` on the ASCII
 # surface; see the L3 deviation note above).
 fn is_ident_start(string c) → bool {
-    return IDENT_START_CHARS.continet(c)
+    return IDENT_START_CHARS.contains(c)
 }
 
 # Whether `c` is a non-zero digit — the F-057 underflow discriminator.
 fn is_non_zero_digit(string c) → bool {
-    return "123456789".continet(c)
+    return "123456789".contains(c)
 }
 
 # Whether `c` starts a float exponent separator (`e` / `E`).
@@ -321,11 +321,11 @@ fn hex_digit(int d) → string {
 
 # Strip `_` separators from numeric source text.
 fn clean_numeric_text(string text) → string {
-    const int len ← text.longitudo()
+    const int len ← text.length()
     var string out ← ""
     var int i ← 0
     while i < len {
-        const string c ← text.sectio(i, i + 1)
+        const string c ← text.slice(i, i + 1)
         if c ≠ "_" {
             out ← "§§"(out, c)
         }
@@ -338,10 +338,10 @@ fn clean_numeric_text(string text) → string {
 # (the part before any `e`/`E` exponent separator). Used to distinguish true
 # zero (`0e-400`) from underflow (`1e-400`).
 fn has_non_zero_significand(string text) → bool {
-    const int len ← text.longitudo()
+    const int len ← text.length()
     var int i ← 0
     while i < len {
-        const string c ← text.sectio(i, i + 1)
+        const string c ← text.slice(i, i + 1)
         if c ≡ "e" or c ≡ "E" {
             break
         }
@@ -357,11 +357,11 @@ fn has_non_zero_significand(string text) → bool {
 # characters. Digit-by-digit accumulation replaces radix's
 # `u64::from_str_radix` (no stdlib equivalent on the en surface).
 fn parse_radix_uint(string clean, int radix) → int ∪ null {
-    const int len ← clean.longitudo()
+    const int len ← clean.length()
     var int acc ← 0
     var int i ← 0
     while i < len {
-        const string c ← clean.sectio(i, i + 1)
+        const string c ← clean.slice(i, i + 1)
         const int ∪ null d ← digit_value(c)
         if d is null {
             return null
@@ -392,7 +392,7 @@ fn parse_uint(string clean) → int ∪ null {
 # boundary cases that radix tests (overflow, underflow, trailing garbage)
 # are decided exactly.
 fn parse_float(string clean) → float ∪ null {
-    const int len ← clean.longitudo()
+    const int len ← clean.length()
     var int i ← 0
     var int sig ← 0
     var int digits ← 0
@@ -405,7 +405,7 @@ fn parse_float(string clean) → float ∪ null {
             done ← true
         }
         else {
-            const string c ← clean.sectio(i, i + 1)
+            const string c ← clean.slice(i, i + 1)
             if c ≡ "." {
                 if seen_dot {
                     return null
@@ -450,7 +450,7 @@ fn parse_float(string clean) → float ∪ null {
         i ← i + 1
         var int exp_sign ← 1
         if i < len {
-            const string s ← clean.sectio(i, i + 1)
+            const string s ← clean.slice(i, i + 1)
             if s ≡ "-" {
                 exp_sign ← -1
                 i ← i + 1
@@ -467,7 +467,7 @@ fn parse_float(string clean) → float ∪ null {
                 exp_done ← true
             }
             else {
-                const int ∪ null d ← digit_value(clean.sectio(i, i + 1))
+                const int ∪ null d ← digit_value(clean.slice(i, i + 1))
                 if d is null {
                     return null
                 }
@@ -790,12 +790,12 @@ fn reject_inline_hash_comment(Lexer lexer, int start) → vacuum {
 # radix's `str::trim_end` strips Unicode whitespace; space/tab covers the
 # Latin corpus (approximation note).
 fn trim_end(string text) → string {
-    const int len ← text.longitudo()
+    const int len ← text.length()
     var int end ← len
     var bool done ← false
     while not done {
         if end > 0 {
-            const string c ← text.sectio(end - 1, end)
+            const string c ← text.slice(end - 1, end)
             if c ≡ " " or c ≡ "\t" {
                 end ← end - 1
             }
@@ -807,7 +807,7 @@ fn trim_end(string text) → string {
             done ← true
         }
     }
-    return text.sectio(0, end)
+    return text.slice(0, end)
 }
 
 # Scan `/` as division or reject C-style comment openers with a migration
@@ -1208,7 +1208,7 @@ fn scan_radix_int(Lexer lexer, int start, int radix, string digit_set, string is
     const string ∪ null c ← cursor.cursor_peek(lx.cursor)
     if c not is null {
         const string c2 ← c
-        if is_ascii_alphanumeric(c2) and not digit_set.continet(c2) {
+        if is_ascii_alphanumeric(c2) and not digit_set.contains(c2) {
             cursor.cursor_eat_while_in(lx.cursor, ASCII_ALNUM_UNDERSCORE_CHARS)
             lexer_emit_issue_error(lx, diagnostic.lex_error_kind_invalid_number(), start, issue)
             lexer_emit_token(lx, token.token_kind_error(), start)
@@ -1256,7 +1256,7 @@ fn keyword_or_ident(Lexer lexer, string text) → token.TokenKind {
     }
     const token.TokenKind ∪ null k ← keywords.keyword_token_kind(text)
     if k not is null {
-        lx.reader_keyword_latin_keys.pone(text, text)
+        lx.reader_keyword_latin_keys.put(text, text)
     }
     const token.Symbol sym ← interner.interner_intern_normalized(lx.interner, text)
     return token.token_kind_ident(sym)
@@ -1294,7 +1294,7 @@ fn is_control_char(string c) → bool {
 fn hex4(int cp) → string {
     var string out ← ""
     var int n ← cp
-    while n > 0 or out.longitudo() < 4 {
+    while n > 0 or out.length() < 4 {
         out ← "§§"(hex_digit(n % 16), out)
         n ← n / 16
     }

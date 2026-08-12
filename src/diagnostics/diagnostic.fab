@@ -417,9 +417,9 @@ fn with_args(Diagnostic d, list<DiagnosticArg> args) → Diagnostic {
 fn with_arg(Diagnostic d, string name, string value) → Diagnostic {
     var list<DiagnosticArg> new_args ← []
     for from d.args const arg {
-        new_args.appende(arg)
+        new_args.append(arg)
     }
-    new_args.appende(DiagnosticArg { name = name, value = value })
+    new_args.append(DiagnosticArg { name = name, value = value })
     return Diagnostic {
         severity = d.severity,
         phase = d.phase,
@@ -589,7 +589,7 @@ fn io_error(string path, string error_message) → Diagnostic {
 fn diagnostic_identity(string code, list<DiagnosticArg> args) → string {
     const string ∪ null iss ← parse_arg_value(args, "issue")
     if iss not is null {
-        if iss.longitudo() > 0 {
+        if iss.length() > 0 {
             return "§.§"(code, iss)
         }
     }
@@ -616,7 +616,7 @@ fn get_line_at_offset(string source, int offset) → string {
     # Snap to a UTF-8 char boundary, then capture the length once; both
     # scans below bound against it.
     const int snapped ← nearest_char_boundary(source, offset)
-    const int len ← source.longitudo()
+    const int len ← source.length()
 
     # Backward scan: the line start is the byte just past the last newline
     # before the snap (0 when the offset sits in the first line).
@@ -647,7 +647,7 @@ fn get_line_at_offset(string source, int offset) → string {
     }
 
     # The line is the slice between the two bounds.
-    return source.sectio(start, end)
+    return source.slice(start, end)
 }
 
 # Snap a byte offset down to the nearest UTF-8 char boundary.
@@ -658,7 +658,7 @@ fn get_line_at_offset(string source, int offset) → string {
 # the clamp (no repeated longitudo() calls that could disagree).
 fn nearest_char_boundary(string source, int offset) → int {
     var int o ← offset
-    const int len ← source.longitudo()
+    const int len ← source.length()
     if o < 0 then o ← 0
     if o > len then o ← len
     return o
