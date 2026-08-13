@@ -660,10 +660,10 @@ fn scan_operator(Lexer lexer, string c) → token.TokenKind ∪ null {
     if c ≡ "↤" {
         return token.token_kind_conversioassign()
     }
-    if c ≡ "⊕" {
+    if c ≡ "↑" {
         return token.token_kind_postinc()
     }
-    if c ≡ "⊖" {
+    if c ≡ "↓" {
         return token.token_kind_postdec()
     }
     if c ≡ "∷" {
