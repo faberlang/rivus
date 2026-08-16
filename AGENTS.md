@@ -2,11 +2,17 @@
 
 Rivus is a **Faber interpreter written in Faber** (`Fab(Faber → run Faber)`).
 It reads a Faber program and runs it in-process: lex → parse → HIR → lower to
-MIR → step (the MIR stepper, Radix's `faber run` design). No codegen.
+MIR → step (the MIR runner, Radix's `faber run` design). No codegen.
 
-Source of truth for the language: `radix/EBNF.md` (grammar), `radix/` front-end
-crates (structure to mirror), `radix-mir-stepper` (interpreter to mirror),
-`radix/stdlib/locale/en/pack.toml` (keyword + intrinsic-method surface).
+**Workspace work mode.** Ordinary development is **direct** in this
+checkout on `main`. Worktree packets under `../worktrees/<lane>/` are
+optional Tugboat isolation. Do not stand up lanes unless the operator
+asked. Container law: [`../AGENTS.md`](../AGENTS.md).
+
+Source of truth for the language: `faber/docs/EBNF.md` (public grammar),
+`radix/` front-end crates (structure to mirror), `radix-mir-runner`
+(interpreter to mirror), `radix/stdlib/locale/en/pack.toml` (keyword +
+intrinsic-method surface).
 
 ## Identity
 
@@ -44,7 +50,7 @@ This codebase is the reference example of what Faber looks like — future LLM
 implementations pattern-match on it. Write it to be attractive, not just
 correct. These rules match the upcoming faber `forma` auto-format behavior:
 
-- **No brace cuddling.** A block-joiner (`else`, `elif`, `catch`, …) starts
+- **No brace cuddling.** A block-joiner (`else`, `elif`, `cape`, …) starts
   on its own line — never `} else {`. The closing brace and the joiner are
   separate lines. This applies to everything that attaches to a prior block,
   not just `if`/`else`.
@@ -97,12 +103,13 @@ TypeTable). Do not skip typecheck to "make it faster."
 
 ## Validation discipline (workspace rules apply)
 
-- Narrow in-loop checks only: the packet-local Faber CLI on touched files, a
-  single touched module, or `./scripta/test --check` from the packet's sibling
-  `radix/` when the change crosses the toolchain. Each packet owns its Cargo
-  target; do not build from main checkouts.
-- One closeout run after the last product edit, then stop. Full runs are
-  auditor-owned.
+- Narrow in-loop checks only: the Faber CLI on touched files, a
+  single touched module, or `./scripta/test --check` from sibling
+  `radix/` when the change crosses the toolchain. Direct work builds in
+  the main checkouts. Lane packets own their own Cargo target and build
+  there, not in a different checkout.
+- One closeout run after the last product edit, then stop. Broad ladders
+  and e2e are optional closeout, not a reason to stand up lanes.
 - Tests strongly preferred for new behavior; red-green; smallest proof.
 
 ## Git discipline (workspace law)
