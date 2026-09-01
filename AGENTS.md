@@ -11,7 +11,7 @@ asked. Container law: [`../AGENTS.md`](../AGENTS.md).
 
 Source of truth for the language: `faber/docs/EBNF.md` (public grammar),
 `radix/` front-end crates (structure to mirror), `radix-mir-runner`
-(interpreter to mirror), `radix/stdlib/locale/en/pack.toml` (keyword +
+(interpreter to mirror), `radix/locale/en/pack.toml` (keyword +
 intrinsic-method surface).
 
 ## Identity
