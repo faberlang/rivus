@@ -6,8 +6,8 @@
 
 [![License: MIT](https://img.shields.io/github/license/faberlang/rivus)](LICENSE)
 
-**Status:** skeleton, pre-implementation. This repo was restarted 2026-08-10
-after the prior attempt was parked at `rivus.to-be-deleted/` (see
+**Status:** skeleton, pre-implementation. This repo was restarted 2026-08-10;
+the prior attempt is preserved in Git history, not as a live directory (see
 [docs/CAMPAIGN.md](docs/CAMPAIGN.md) for the full history and the reboot
 rationale).
 
