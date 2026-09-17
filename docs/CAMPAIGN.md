@@ -50,10 +50,10 @@ Both failures were **process failures, not architecture or language failures.**
 The planning docs from attempt 2 were excellent — the implementation betrayed
 them, and the docs were amended to ratify the betrayal.
 
-**What we keep:** the old tree lives at `rivus.to-be-deleted/` (git history,
-forensics, and the planning docs — the Q1 corpus analysis, the unit specs, the
-gate inventory). It is non-authoritative for current syntax; the lessons are
-extracted into this document and `AGENTS.md`.
+**What we keep:** the prior attempt is preserved in Git history (forensics
+and the planning docs — the Q1 corpus analysis, the unit specs, the gate
+inventory), not as a live sibling directory. It is non-authoritative for
+current syntax; the lessons are extracted into this document and `AGENTS.md`.
 
 ## Design
 
@@ -148,6 +148,8 @@ inference (**optional**, the old #78 cliff — deferred to P3 at most).
 
 ## Archive
 
-- Old tree: `rivus.to-be-deleted/` (preserved; not authoritative).
-- Prior planning docs: readable there for the Q1 corpus analysis, unit
-  specs, and gate inventory — treat as reference, not current state.
+- Prior attempt: preserved in Git history, not as a live sibling directory
+  (not authoritative).
+- Prior planning docs: recoverable from that history for the Q1 corpus
+  analysis, unit specs, and gate inventory — treat as reference, not
+  current state.
