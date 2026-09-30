@@ -19,8 +19,8 @@
 # serialization in rivus).
 
 class Span {
-    int start
-    int end
+    var int start
+    var int end
 }
 
 # Create a span from cursor-derived byte offsets.
